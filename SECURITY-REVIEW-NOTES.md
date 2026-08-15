@@ -39,6 +39,34 @@ was flagged in.
 - **Risk:** `BotAuthVerifyRequest` accepts a `body` field, but nothing in the current implementation covers it — there's no support for verifying a `content-digest` header against the actual request body. A signature that doesn't cover the body (or covers it via a digest header we don't check) can't be trusted to guarantee the body wasn't tampered with in transit to the origin.
 - **Suggested fix:** Implement RFC 9530 `Content-Digest` verification and require it as a covered component whenever a request has a body.
 
+### 5. Mode B bot detection is User-Agent-only and inherently spoofable
+
+- **File/function:** `packages/wp-plugin/includes/class-bot-signatures.php` — `Bot_Signatures::is_ai_crawler()`, `packages/wp-plugin/includes/class-mode-b-guard.php` — `Mode_B_Guard::decide()`
+- **Flagged in:** Phase 5 (explicitly called out as an accepted, unavoidable limitation in the Phase 5 spec itself — logged here so it's on record for the Phase 8 review, not because it's news)
+- **Risk:** Mode B (the shared-hosting fallback, no reverse proxy) classifies traffic purely by matching the `User-Agent` header against a bundled list — there is no cryptographic verification available in PHP for this phase, unlike the middleware's RFC 9421 `verifyBotAuthSignature()`. Anyone can set an arbitrary `User-Agent` string, so Mode B's "ai-crawler" charge gate can be bypassed entirely by not claiming to be a crawler, or triggered spuriously by anyone who does claim to be one.
+- **Suggested fix:** None available in pure PHP for this phase. The real fix is migrating the site to Mode A (reverse proxy in front of the middleware), which does have Web Bot Auth verification. Worth an explicit product decision on how prominently Mode B's weaker guarantee should be surfaced to site owners (the settings page already states this; consider whether that's sufficient).
+
+### 6. `data/bot-signatures.json` (PHP) has no automated sync with the Node copy
+
+- **File/function:** `packages/wp-plugin/data/bot-signatures.json` vs. `packages/middleware/config/bot-signatures.json`
+- **Flagged in:** Phase 5
+- **Risk:** The plugin ships a manually-copied snapshot of the Node middleware's crawler signature list. If the Node list is updated (new crawler added/renamed) and the PHP copy isn't updated in lockstep, Mode A and Mode B will classify the same request differently — e.g. a newly-added AI crawler gets charged by the middleware but passes through free on a Mode B site, or vice versa.
+- **Suggested fix:** A build step that generates the PHP copy from the Node JSON at release time (even a trivial copy-and-check-in script), or a CI check that fails if the two files diverge.
+
+### 7. Mode B fails open when the middleware is unreachable
+
+- **File/function:** `packages/wp-plugin/includes/class-mode-b-guard.php` — `Mode_B_Guard::decide_with_proof()`, `decide_without_proof()`
+- **Flagged in:** Phase 5
+- **Risk:** If `/verify-and-price` can't be reached (network issue, middleware down/restarting), Mode B lets the request through unmetered rather than blocking it. This was a deliberate choice — the alternative (fail closed) risks serving 402s to legitimate crawlers or making the site look broken during a routine middleware restart — but it does mean any middleware outage is a direct revenue leak with no alerting built in. Worth explicit product sign-off rather than just an engineering default.
+- **Suggested fix:** At minimum, log these fail-open events somewhere visible (currently they're silent from WordPress's perspective); consider whether a persistent/extended outage should eventually flip to fail-closed.
+
+### 8. `/stats`, `/verify-and-price`, and the REST config endpoint are open by default
+
+- **File/function:** `packages/middleware/src/server.ts` — `isAuthorized()`; `packages/wp-plugin/includes/class-rest-config-controller.php` — `check_permission()`
+- **Flagged in:** Phase 5
+- **Risk:** All three endpoints only require the `X-Crawlpay-Site-Key` shared secret if one has been configured; with none set (the out-of-the-box default), they're fully open. `/stats` and the REST config endpoint leak revenue/traffic data and pricing/payout-address configuration; `/verify-and-price` can be hit directly by anyone to trigger real facilitator verification calls and nonce consumption, bypassing WordPress's own classification entirely.
+- **Suggested fix:** Consider making the site key mandatory (refuse to serve these routes at all without one configured) rather than silently falling back to open, at least for production-flagged deployments.
+
 ## Resolved items
 
 _(none yet)_

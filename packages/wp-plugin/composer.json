@@ -1,0 +1,19 @@
+{
+  "name": "crawlpay/wp-plugin",
+  "description": "Dev/test tooling for the CrawlPay WordPress plugin. Not shipped with the plugin — the plugin itself has no PHP dependencies beyond WordPress core.",
+  "type": "wordpress-plugin",
+  "license": "GPL-2.0-or-later",
+  "require": {
+    "php": ">=8.0"
+  },
+  "require-dev": {
+    "phpunit/phpunit": "^9.6",
+    "yoast/phpunit-polyfills": "^2.0",
+    "wp-phpunit/wp-phpunit": "^6.6"
+  },
+  "config": {
+    "allow-plugins": {
+      "composer/installers": true
+    }
+  }
+}

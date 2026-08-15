@@ -271,3 +271,129 @@ describe("health and metrics", () => {
     expect(response.body).toContain("crawlpay_cache_hits_total");
   });
 });
+
+describe("GET /stats", () => {
+  it("reports cache and revenue counters as JSON", async () => {
+    const app = buildTestServer();
+
+    const proof: PaymentProof = {
+      x402Version: 1,
+      scheme: "exact",
+      network: "base-sepolia",
+      nonce: "stats-nonce-1",
+      payload: {},
+    };
+    await app.inject({
+      method: "GET",
+      url: "/premium-article.html",
+      headers: { "user-agent": GPTBOT_UA, "x-payment": encodePaymentHeader(proof) },
+    });
+
+    const response = await app.inject({ method: "GET", url: "/stats" });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
+    expect(body.cache).toEqual(
+      expect.objectContaining({ hits: expect.any(Number), misses: expect.any(Number) }),
+    );
+    expect(body.revenue).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ classification: "ai-crawler", count: expect.any(Number) }),
+      ]),
+    );
+  });
+
+  it("requires the site key when one is configured", async () => {
+    const app = buildTestServer({ siteKey: "top-secret" });
+
+    const unauthorized = await app.inject({ method: "GET", url: "/stats" });
+    expect(unauthorized.statusCode).toBe(401);
+
+    const authorized = await app.inject({
+      method: "GET",
+      url: "/stats",
+      headers: { "x-crawlpay-site-key": "top-secret" },
+    });
+    expect(authorized.statusCode).toBe(200);
+  });
+});
+
+describe("POST /verify-and-price (Mode B synchronous check)", () => {
+  it("returns a charge decision with a payment manifest when no proof is given", async () => {
+    const app = buildTestServer();
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/verify-and-price",
+      payload: { url: "http://example.test/premium-article.html" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
+    expect(body.action).toBe("charge");
+    expect(body.paymentRequired.accepts[0].maxAmountRequired).toBe("10000");
+  });
+
+  it("returns allow and records a transaction for a valid proof", async () => {
+    const recorded: Transaction[] = [];
+    const transactionLog: TransactionLog = {
+      record: async (transaction) => {
+        recorded.push(transaction);
+      },
+    };
+    const app = buildTestServer({ transactionLog });
+
+    const proof: PaymentProof = {
+      x402Version: 1,
+      scheme: "exact",
+      network: "base-sepolia",
+      nonce: "verify-and-price-nonce-1",
+      payload: {},
+    };
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/verify-and-price",
+      payload: {
+        url: "http://example.test/premium-article.html",
+        paymentProofHeader: encodePaymentHeader(proof),
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ action: "allow" });
+    expect(recorded).toHaveLength(1);
+    expect(recorded[0]?.botClassification).toBe("ai-crawler");
+  });
+
+  it("rejects malformed request bodies", async () => {
+    const app = buildTestServer();
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/verify-and-price",
+      payload: { notAUrl: true },
+    });
+
+    expect(response.statusCode).toBe(400);
+  });
+
+  it("requires the site key when one is configured", async () => {
+    const app = buildTestServer({ siteKey: "top-secret" });
+
+    const unauthorized = await app.inject({
+      method: "POST",
+      url: "/verify-and-price",
+      payload: { url: "http://example.test/premium-article.html" },
+    });
+    expect(unauthorized.statusCode).toBe(401);
+
+    const authorized = await app.inject({
+      method: "POST",
+      url: "/verify-and-price",
+      headers: { "x-crawlpay-site-key": "top-secret" },
+      payload: { url: "http://example.test/premium-article.html" },
+    });
+    expect(authorized.statusCode).toBe(200);
+  });
+});

@@ -16,6 +16,14 @@ class CacheHitRateMetrics {
     this.misses = 0;
   }
 
+  get hitCount(): number {
+    return this.hits;
+  }
+
+  get missCount(): number {
+    return this.misses;
+  }
+
   toPrometheusText(): string {
     return (
       [

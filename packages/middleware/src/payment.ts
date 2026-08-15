@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { build402Response, type PaymentRequirements } from "@crawlpay/core";
+import { build402Response, type Http402Response, type PaymentRequirements } from "@crawlpay/core";
 import type { FastifyReply } from "fastify";
 import type { PricingConfig } from "./config/publisher-config";
 
@@ -26,14 +26,22 @@ export function buildPaymentRequirements(
 }
 
 /** Always mints a fresh nonce — every 402, regardless of cause, is a clean invitation to retry. */
+export function buildFreshPaymentRequiredResponse(
+  resourceUrl: string,
+  pricing: PricingConfig,
+): Http402Response {
+  const requirements = buildPaymentRequirements(resourceUrl, pricing);
+  const response = build402Response(requirements);
+  response.body.error = GENERIC_PAYMENT_MESSAGE;
+  return response;
+}
+
 export function respondWithPaymentRequired(
   reply: FastifyReply,
   resourceUrl: string,
   pricing: PricingConfig,
 ): unknown {
-  const requirements = buildPaymentRequirements(resourceUrl, pricing);
-  const response = build402Response(requirements);
-  response.body.error = GENERIC_PAYMENT_MESSAGE;
+  const response = buildFreshPaymentRequiredResponse(resourceUrl, pricing);
 
   for (const [key, value] of Object.entries(response.headers)) {
     reply.header(key, value);
