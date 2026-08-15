@@ -1,7 +1,7 @@
-FROM node:20-alpine
+FROM node:22-alpine
 
 WORKDIR /repo
-RUN corepack enable
+RUN npm install -g pnpm@11.21.0
 
 COPY . .
 RUN pnpm install --frozen-lockfile

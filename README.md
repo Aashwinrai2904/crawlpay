@@ -32,7 +32,7 @@ code:
 
 ## Prerequisites
 
-- Node.js >= 20
+- Node.js >= 22 (pnpm 11 requires it)
 - pnpm (`corepack enable` or `npm install -g pnpm`)
 - Docker + Docker Compose (for local infra)
 
