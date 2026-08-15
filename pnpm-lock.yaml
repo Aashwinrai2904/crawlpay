@@ -107,6 +107,9 @@ importers:
       '@eslint/js':
         specifier: ^9.13.0
         version: 9.39.5
+      '@types/node':
+        specifier: ^20.16.11
+        version: 20.19.43
       eslint:
         specifier: ^9.13.0
         version: 9.39.5(supports-color@7.2.0)
