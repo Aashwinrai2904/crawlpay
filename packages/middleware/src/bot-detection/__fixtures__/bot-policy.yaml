@@ -1,0 +1,4 @@
+human: allow
+search-crawler: allow
+ai-crawler: charge
+unknown-bot: block

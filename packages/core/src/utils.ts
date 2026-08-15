@@ -19,3 +19,14 @@ export function base64UrlDecode(input: string): string {
   const padding = padded.length % 4 === 0 ? "" : "=".repeat(4 - (padded.length % 4));
   return Buffer.from(padded + padding, "base64").toString("utf8");
 }
+
+/** Case-insensitive lookup in a plain headers object. */
+export function findHeader(headers: Record<string, string>, name: string): string | undefined {
+  const target = name.toLowerCase();
+  for (const [key, value] of Object.entries(headers)) {
+    if (key.toLowerCase() === target) {
+      return value;
+    }
+  }
+  return undefined;
+}

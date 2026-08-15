@@ -1,4 +1,4 @@
-import { base64UrlDecode } from "./utils";
+import { base64UrlDecode, findHeader } from "./utils";
 import { type PaymentProof, PaymentProofSchema } from "./x402";
 
 const PAYMENT_HEADER = "x-payment";
@@ -31,14 +31,4 @@ export function parsePaymentProof(headers: Record<string, string>): PaymentProof
 
   const result = PaymentProofSchema.safeParse(json);
   return result.success ? result.data : null;
-}
-
-function findHeader(headers: Record<string, string>, name: string): string | undefined {
-  const target = name.toLowerCase();
-  for (const [key, value] of Object.entries(headers)) {
-    if (key.toLowerCase() === target) {
-      return value;
-    }
-  }
-  return undefined;
 }

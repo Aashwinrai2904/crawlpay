@@ -1,0 +1,31 @@
+{
+  "aiCrawlers": [
+    { "name": "GPTBot", "userAgentPattern": "GPTBot" },
+    { "name": "ChatGPT-User", "userAgentPattern": "ChatGPT-User" },
+    { "name": "OAI-SearchBot", "userAgentPattern": "OAI-SearchBot" },
+    { "name": "ClaudeBot", "userAgentPattern": "ClaudeBot" },
+    { "name": "Claude-Web", "userAgentPattern": "Claude-Web" },
+    { "name": "anthropic-ai", "userAgentPattern": "anthropic-ai" },
+    { "name": "PerplexityBot", "userAgentPattern": "PerplexityBot" },
+    { "name": "Perplexity-User", "userAgentPattern": "Perplexity-User" },
+    { "name": "Google-Extended", "userAgentPattern": "Google-Extended" },
+    { "name": "CCBot", "userAgentPattern": "CCBot" },
+    { "name": "Bytespider", "userAgentPattern": "Bytespider" },
+    { "name": "Amazonbot", "userAgentPattern": "Amazonbot" },
+    { "name": "Applebot-Extended", "userAgentPattern": "Applebot-Extended" },
+    { "name": "cohere-ai", "userAgentPattern": "cohere-ai" },
+    { "name": "Diffbot", "userAgentPattern": "Diffbot" },
+    { "name": "FacebookBot", "userAgentPattern": "FacebookBot" },
+    { "name": "meta-externalagent", "userAgentPattern": "meta-externalagent" },
+    { "name": "MistralAI-User", "userAgentPattern": "MistralAI-User" }
+  ],
+  "searchCrawlers": [
+    { "name": "Googlebot", "userAgentPattern": "Googlebot" },
+    { "name": "Bingbot", "userAgentPattern": "bingbot" },
+    { "name": "Slurp", "userAgentPattern": "Slurp" },
+    { "name": "DuckDuckBot", "userAgentPattern": "DuckDuckBot" },
+    { "name": "Baiduspider", "userAgentPattern": "Baiduspider" },
+    { "name": "YandexBot", "userAgentPattern": "YandexBot" },
+    { "name": "Applebot", "userAgentPattern": "Applebot" }
+  ]
+}

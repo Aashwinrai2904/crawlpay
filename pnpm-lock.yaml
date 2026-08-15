@@ -168,10 +168,19 @@ importers:
       fastify:
         specifier: ^4.28.1
         version: 4.29.1
+      yaml:
+        specifier: ^2.6.0
+        version: 2.9.0
+      zod:
+        specifier: ^3.23.8
+        version: 3.25.76
     devDependencies:
       '@eslint/js':
         specifier: ^9.13.0
         version: 9.39.5
+      '@types/node':
+        specifier: ^20.16.11
+        version: 20.19.43
       eslint:
         specifier: ^9.13.0
         version: 9.39.5(supports-color@7.2.0)
@@ -2860,6 +2869,11 @@ packages:
 
   wrappy@1.0.2:
     resolution: {integrity: sha512-l4Sp/DRseor9wL6EvV2+TuQn63dMkPjZ/sp9XkghTEbV9KlPS1xUsZ3u7/IQO4wxtcFB4bgpQPRcR3QCvezPcQ==}
+
+  yaml@2.9.0:
+    resolution: {integrity: sha512-2AvhNX3mb8zd6Zy7INTtSpl1F15HW6Wnqj0srWlkKLcpYl/gMIMJiyuGq2KeI2YFxUPjdlB+3Lc10seMLtL4cA==}
+    engines: {node: '>= 14.6'}
+    hasBin: true
 
   yocto-queue@0.1.0:
     resolution: {integrity: sha512-rVksvsnNCdJ/ohGc6xgPwyN8eheCxsiLM8mxuE/t/mOVqJewPuO1miLpTHQiRgTKCLexL4MeAFVagts7HmNZ2Q==}
@@ -5831,6 +5845,8 @@ snapshots:
       strip-ansi: 7.2.0
 
   wrappy@1.0.2: {}
+
+  yaml@2.9.0: {}
 
   yocto-queue@0.1.0: {}
 
