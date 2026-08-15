@@ -18,6 +18,15 @@ export interface FacilitatorClientOptions {
 }
 
 /**
+ * The contract callers actually depend on — lets server-side code (and
+ * tests) inject anything that can verify a proof without depending on
+ * FacilitatorClient's concrete (privately-fielded) shape.
+ */
+export interface PaymentVerifier {
+  verify(proof: PaymentProof, requirements: PaymentRequirements): Promise<VerificationResult>;
+}
+
+/**
  * Talks to an x402 facilitator's /verify endpoint. Swappable between the
  * local mock-facilitator and a real facilitator (e.g. Coinbase's) purely
  * via CRAWLPAY_FACILITATOR_URL or the baseUrl option — callers never need
@@ -25,7 +34,7 @@ export interface FacilitatorClientOptions {
  * throws: it resolves to a VerificationResult with valid:false and a
  * human-readable reason.
  */
-export class FacilitatorClient {
+export class FacilitatorClient implements PaymentVerifier {
   private readonly baseUrl: string;
   private readonly timeoutMs: number;
   private readonly fetchImpl: typeof fetch;

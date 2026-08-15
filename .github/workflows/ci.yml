@@ -25,6 +25,13 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # Workspace packages (e.g. @crawlpay/core, mock-origin, mock-facilitator)
+      # are consumed by their compiled dist/ via package.json main/types, not
+      # their TS source — typecheck and test both fail to resolve them without
+      # this running first.
+      - name: Build
+        run: pnpm build
+
       - name: Lint
         run: pnpm lint
 

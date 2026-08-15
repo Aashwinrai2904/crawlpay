@@ -1,0 +1,15 @@
+{
+  "policy": {
+    "human": "allow",
+    "search-crawler": "allow",
+    "ai-crawler": "charge",
+    "unknown-bot": "block"
+  },
+  "pricing": {
+    "network": "base-sepolia",
+    "asset": "USDC",
+    "maxAmountRequired": "10000",
+    "payTo": "0xPUBLISHER00000000000000000000000000000",
+    "maxTimeoutSeconds": 60
+  }
+}
