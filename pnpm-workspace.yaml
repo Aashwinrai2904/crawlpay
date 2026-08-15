@@ -1,0 +1,7 @@
+packages:
+  - "packages/*"
+  - "infra/mock-origin"
+  - "infra/mock-facilitator"
+allowBuilds:
+  esbuild: true
+  unrs-resolver: true
