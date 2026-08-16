@@ -18,6 +18,11 @@ import {
   type LockStore,
 } from "./cache";
 import { loadPublisherConfig, type PublisherConfig } from "./config/publisher-config";
+import {
+  StaticPublisherConfigSource,
+  WordPressPublisherConfigSource,
+  type PublisherConfigSource,
+} from "./config/publisher-config-source";
 import { respondWithPaymentRequired } from "./payment";
 import { fetchFromOrigin, normalizeHeaders, publicUrlFor, respondWithOrigin } from "./proxy";
 import {
@@ -33,7 +38,23 @@ const SITE_KEY_HEADER = "x-crawlpay-site-key";
 
 export interface BuildServerOptions {
   originBaseUrl?: string;
+  /**
+   * A fixed policy/pricing config, used as-is for the server's lifetime.
+   * Ignored if publisherConfigSource is given. If neither is given and
+   * wordpressUrl (or CRAWLPAY_WORDPRESS_URL) is set, the server instead
+   * polls WordPress for config that can change at runtime.
+   */
   publisherConfig?: PublisherConfig;
+  /** Full control over where policy/pricing comes from; overrides publisherConfig and wordpressUrl. */
+  publisherConfigSource?: PublisherConfigSource;
+  /**
+   * Base URL of the WordPress site to poll GET /wp-json/crawlpay/v1/config
+   * from, so payTo/pricing/policy set on Settings > CrawlPay actually take
+   * effect here instead of the local publisher-config.json placeholder.
+   * Defaults to CRAWLPAY_WORDPRESS_URL; if neither is set, falls back to
+   * the local file and never polls.
+   */
+  wordpressUrl?: string;
   botSignatureConfig?: BotSignatureConfig;
   cacheStore?: CacheStore & LockStore;
   nonceStore?: NonceStore;
@@ -44,8 +65,10 @@ export interface BuildServerOptions {
   /**
    * Shared secret the WordPress plugin (Mode B) and any other external
    * caller must present via X-Crawlpay-Site-Key to use /stats and
-   * /verify-and-price. Defaults to CRAWLPAY_SITE_KEY; if neither is set,
-   * those endpoints are open — fine for local dev, not for production.
+   * /verify-and-price. Also sent back to WordPress when polling its config
+   * endpoint, since that endpoint is guarded by the same shared secret.
+   * Defaults to CRAWLPAY_SITE_KEY; if neither is set, those endpoints are
+   * open — fine for local dev, not for production.
    */
   siteKey?: string;
 }
@@ -63,7 +86,6 @@ const VerifyAndPriceRequestSchema = z.object({
  */
 export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
   const originBaseUrl = options.originBaseUrl ?? process.env.ORIGIN_URL ?? DEFAULT_ORIGIN_URL;
-  const publisherConfig = options.publisherConfig ?? loadPublisherConfig();
   const botSignatureConfig = options.botSignatureConfig;
   const cacheStore = options.cacheStore ?? new InMemoryCacheStore();
   const nonceStore = options.nonceStore ?? new InMemoryNonceStore();
@@ -73,8 +95,28 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
     new CompositeTransactionLog([new ConsoleTransactionLog(), new PostgresTransactionLog()]);
   const fetchImpl = options.fetchImpl ?? fetch;
   const siteKey = options.siteKey ?? process.env.CRAWLPAY_SITE_KEY;
+  const wordpressUrl = options.wordpressUrl ?? process.env.CRAWLPAY_WORDPRESS_URL;
 
   const app = Fastify({ logger: options.logger ?? true });
+
+  const publisherConfigSource: PublisherConfigSource =
+    options.publisherConfigSource ??
+    (options.publisherConfig
+      ? new StaticPublisherConfigSource(options.publisherConfig)
+      : wordpressUrl
+        ? new WordPressPublisherConfigSource({
+            wordpressUrl,
+            siteKey,
+            fallback: loadPublisherConfig(),
+            fetchImpl,
+            onPollError: (err) => app.log.warn({ err }, "failed to poll WordPress config"),
+          })
+        : new StaticPublisherConfigSource(loadPublisherConfig()));
+
+  app.addHook("onClose", (_instance, done) => {
+    publisherConfigSource.stop?.();
+    done();
+  });
 
   function isAuthorized(headers: Record<string, string>): boolean {
     if (!siteKey) {
@@ -137,7 +179,7 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
     const decision = await resolveCharge(parsed.data.url, parsed.data.paymentProofHeader, {
       nonceStore,
       facilitatorClient,
-      pricing: publisherConfig.pricing,
+      pricing: publisherConfigSource.getConfig().pricing,
     });
 
     if (decision.outcome !== "paid") {
@@ -167,6 +209,7 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
   });
 
   app.get("/*", async (request, reply) => {
+    const publisherConfig = publisherConfigSource.getConfig();
     const headers = normalizeHeaders(request.headers);
     const classification = classifyRequest(headers, request.ip, botSignatureConfig);
     const action = resolvePolicy(classification, publisherConfig.policy);

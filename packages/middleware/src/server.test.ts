@@ -8,7 +8,7 @@ import {
 } from "@crawlpay/core";
 import { buildApp as buildMockFacilitatorApp } from "mock-facilitator";
 import { buildApp as buildMockOriginApp } from "mock-origin";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BotSignatureConfig } from "./bot-detection";
 import { cacheMetrics, InMemoryCacheStore } from "./cache";
 import type { PublisherConfig } from "./config/publisher-config";
@@ -395,5 +395,48 @@ describe("POST /verify-and-price (Mode B synchronous check)", () => {
       payload: { url: "http://example.test/premium-article.html" },
     });
     expect(authorized.statusCode).toBe(200);
+  });
+});
+
+describe("wordpressUrl (polling WordPress for pricing/policy)", () => {
+  it("charges using the payTo/price WordPress reports, not the local default", async () => {
+    const wordpressConfig: PublisherConfig = {
+      policy: publisherConfig.policy,
+      pricing: {
+        network: "base-sepolia",
+        asset: "USDC",
+        maxAmountRequired: "99999",
+        payTo: "0xFROMWORDPRESS0000000000000000000000000",
+        maxTimeoutSeconds: 60,
+      },
+    };
+
+    const fetchImpl: typeof fetch = async (input, init) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("/wp-json/crawlpay/v1/config")) {
+        return new Response(JSON.stringify(wordpressConfig), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return fetch(input, init);
+    };
+
+    const app = buildTestServer({
+      publisherConfig: undefined,
+      wordpressUrl: "https://wordpress.example.test",
+      fetchImpl,
+    });
+
+    // The first poll fires from the constructor without awaiting; give it a
+    // tick to land before asserting on the config it produced.
+    await vi.waitFor(async () => {
+      const response = await app.inject({
+        method: "GET",
+        url: "/premium-article.html",
+        headers: { "user-agent": GPTBOT_UA },
+      });
+      expect(response.json().accepts[0].payTo).toBe("0xFROMWORDPRESS0000000000000000000000000");
+    });
   });
 });

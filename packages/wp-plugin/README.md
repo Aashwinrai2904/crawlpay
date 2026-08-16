@@ -65,12 +65,20 @@ changes) — switch to Mode A once your reverse proxy is actually in place.
 
 ## Not yet wired up
 
-- The middleware still reads `publisher-config.json` locally; it doesn't
-  poll this plugin's REST config endpoint yet. That's future work on the
-  middleware side.
-- Per-post price overrides are exposed via REST but not yet consumed by
-  Mode B's `/verify-and-price` calls (which only know the site-wide
-  default price).
+- Per-post price overrides are exposed via REST (`overrides` in the config
+  response) but not yet consumed anywhere — not by the middleware's own
+  pricing decisions, and not by Mode B's `/verify-and-price` calls (both
+  only know the site-wide default price).
+
+The middleware polling this plugin's `GET /wp-json/crawlpay/v1/config` for
+policy/pricing (including `payTo`) — instead of only reading its local
+`publisher-config.json` — is now wired up on the middleware side (see
+[`../middleware/src/config/publisher-config-source.ts`](../middleware/src/config/publisher-config-source.ts)).
+Point it at this site by setting the middleware's `CRAWLPAY_WORDPRESS_URL`
+env var to this site's base URL; it reuses the same site key both plugin
+and middleware already share. It polls every 30s and falls back to the
+local file if this site is ever unreachable, so a WordPress outage
+degrades to stale pricing rather than breaking the middleware.
 
 See [`../../SECURITY-REVIEW-NOTES.md`](../../SECURITY-REVIEW-NOTES.md) for
 known gaps flagged during this phase (items 5-8).
