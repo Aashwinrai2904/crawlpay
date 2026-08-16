@@ -1,0 +1,40 @@
+services:
+  # Fake x402 facilitator (Phase 0) — lets the middleware verify payments
+  # without hitting real Coinbase infra. No auth, no persistent state.
+  - type: web
+    name: crawlpay-mock-facilitator
+    runtime: node
+    plan: free
+    region: oregon
+    buildCommand: npm install -g pnpm@11.21.0 && pnpm install --frozen-lockfile && pnpm --filter mock-facilitator build
+    startCommand: pnpm --filter mock-facilitator start
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+
+  # The real CrawlPay middleware (Phases 1-4). Deployed as a normal
+  # persistent Node process (not a serverless function) specifically so its
+  # in-memory nonce store and cache correctly prevent payment-proof replay
+  # under concurrent requests -- see the chat history for why Vercel's
+  # serverless model is unsafe for this without an external store.
+  - type: web
+    name: crawlpay-middleware
+    runtime: node
+    plan: free
+    region: oregon
+    healthCheckPath: /health
+    buildCommand: npm install -g pnpm@11.21.0 && pnpm install --frozen-lockfile && pnpm --filter @crawlpay/middleware... build
+    startCommand: pnpm --filter @crawlpay/middleware start
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: CRAWLPAY_FACILITATOR_URL
+        value: https://crawlpay-mock-facilitator.onrender.com
+      # Auto-generated on first deploy, stays stable across redeploys.
+      # Never hardcode a real secret here -- this file is committed to a
+      # PUBLIC GitHub repo. After deploy, copy the generated value from
+      # the crawlpay-middleware service's Environment tab in the Render
+      # dashboard into the WordPress plugin's Settings > CrawlPay > Site
+      # key field -- they must match exactly.
+      - key: CRAWLPAY_SITE_KEY
+        generateValue: true
