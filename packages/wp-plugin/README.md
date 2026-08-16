@@ -5,11 +5,25 @@ excluded from `pnpm-workspace.yaml`, root ESLint, and root TypeScript
 config. The plugin itself has no PHP dependencies beyond WordPress core;
 `composer.json` here is dev/test tooling only, never shipped.
 
-**This code hasn't been executed.** The sandbox this was built in has no
-PHP, Composer, or WP-CLI available — everything here is written carefully
-against WordPress coding conventions but needs a real PHP + WordPress
-environment to actually verify. Run `phpcs` (WordPress-Coding-Standards) and
-the PHPUnit suite before trusting this in production.
+**Manually verified on a real WordPress install** (TasteWP, WP 7.0.4, PHP 8,
+2026-08-16): plugin activation, the Settings > CrawlPay page (loads and
+saves), the per-post/page "CrawlPay Pricing" meta box, and the "CrawlPay
+Activity" dashboard widget all confirmed working with no fatal errors. This
+caught one real bug pre-launch: `crawlpay.php` originally called
+`\CrawlPay\Plugin::instance()->init()` unconditionally at file-scope, which
+WordPress's activation-time `plugin_sandbox_scrape()` re-include tripped
+over as a fatal `TypeError`. Fixed by deferring that call to `plugins_loaded`
+(see crawlpay.php).
+
+Still unverified: the sandbox this plugin was originally built in has no
+PHP, Composer, or WP-CLI, so the PHPUnit suite itself has never actually
+been run (written carefully against wp-phpunit conventions, but unexecuted)
+— run `composer install && composer exec phpunit` before trusting it. Mode
+B's actual `/verify-and-price` behavior against a live middleware is also
+still untested end-to-end (the settings/activation checks above were done
+with Middleware URL left blank, which makes Mode B's guard a no-op by
+design). Run `phpcs` (WordPress-Coding-Standards) too if you want static
+analysis on top of the above.
 
 ## What this plugin is
 
