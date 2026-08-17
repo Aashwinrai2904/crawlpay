@@ -67,6 +67,27 @@ was flagged in.
 - **Risk:** All three endpoints only require the `X-Crawlpay-Site-Key` shared secret if one has been configured; with none set (the out-of-the-box default), they're fully open. `/stats` and the REST config endpoint leak revenue/traffic data and pricing/payout-address configuration; `/verify-and-price` can be hit directly by anyone to trigger real facilitator verification calls and nonce consumption, bypassing WordPress's own classification entirely.
 - **Suggested fix:** Consider making the site key mandatory (refuse to serve these routes at all without one configured) rather than silently falling back to open, at least for production-flagged deployments.
 
+### 9. Dashboard tenant isolation is application-level only, not database-level
+
+- **File/function:** `packages/dashboard/lib/auth.ts` — `requirePublisher()`; `packages/dashboard/app/dashboard/sites/[id]/actions.ts` — `requireOwnedSite()`
+- **Flagged in:** Phase 6
+- **Risk:** Every Supabase table (`publishers`, `sites`, `pricing_rules`, `policy_rules`, `transactions`) has RLS enabled with no policies — intentional, but as a deny-all backstop for the `anon`/`authenticated` PostgREST roles only. All real reads/writes go through Prisma via a dedicated `crawlpay_app` Postgres role created with `BYPASSRLS`, connected with a direct connection string. That means the database itself enforces no per-publisher boundary at all — every `requirePublisher()`/`requireOwnedSite()` call in application code is the *only* thing stopping one publisher's session from reading or modifying another's sites, pricing, or transaction history. A bug in any of those checks, or a leak of `DATABASE_URL`, is a full cross-tenant breach, not a scoped one.
+- **Suggested fix:** Either write real RLS policies keyed to `auth.uid()` (requires querying through `supabase-js`/PostgREST instead of Prisma's direct connection, or setting `request.jwt.claims` per-request with Prisma, which it doesn't support natively), or at minimum add integration tests that assert cross-tenant access is rejected for every mutating action, so a regression here fails CI instead of shipping silently.
+
+### 10. `middlewareDeployKey` and `middleware_deploy_key`-equivalent secrets are stored in plaintext
+
+- **File/function:** `packages/dashboard/prisma/schema.prisma` — `Site.middlewareDeployKey`
+- **Flagged in:** Phase 6
+- **Risk:** Same pattern already accepted for the middleware's `CRAWLPAY_SITE_KEY` and the WP plugin's `site_key` setting — the bearer secret a deployed middleware presents to `/api/v1/config` and `/api/v1/transactions` is stored as plain text in Postgres, readable by anyone with `crawlpay_app` (or `postgres`-role) database access, with no rotation UI (a compromised key must currently be fixed by deleting and recreating the `Site` row, which also generates a new key but is a destructive workaround, not a real rotation flow).
+- **Suggested fix:** Store a hash (e.g. bcrypt/argon2) and show the plaintext value once at creation, matching how the credential is actually used (presented as a bearer token, never read back by the application itself). Add an explicit "regenerate deploy key" action.
+
+### 11. `/api/v1/config` and `/api/v1/transactions` have no rate limiting
+
+- **File/function:** `packages/dashboard/app/api/v1/config/route.ts`, `packages/dashboard/app/api/v1/transactions/route.ts`
+- **Flagged in:** Phase 6
+- **Risk:** Same class of gap as item 8 — these endpoints authenticate via a bearer deploy key with no request-rate limits. A leaked deploy key (or a misbehaving/looping middleware instance) can hammer either endpoint with no backpressure; `/api/v1/transactions` in particular writes a new row per call with no dedupe, so a retry storm inflates the dashboard's own revenue numbers.
+- **Suggested fix:** Same as item 8's suggested fix, applied here too — likely worth solving both at once in the Phase 8 security pass rather than separately.
+
 ## Resolved items
 
 _(none yet)_

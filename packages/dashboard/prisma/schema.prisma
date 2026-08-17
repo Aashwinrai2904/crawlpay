@@ -1,0 +1,91 @@
+// Schema mirrors the tables created directly in Supabase (see the
+// `phase6_dashboard_schema` / `phase6_app_role` migrations run through the
+// Supabase MCP tools) rather than through `prisma migrate`. Keep this file
+// and that SQL in sync by hand -- running `prisma migrate` against this
+// database would fight Supabase's own migration history for tables it
+// doesn't know it created.
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// One row per Supabase Auth user (auth.users), created automatically by
+// the on_auth_user_created trigger on first magic-link sign-in.
+model Publisher {
+  id            String   @id @db.Uuid
+  walletAddress String?  @map("wallet_address")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  sites Site[]
+
+  @@map("publishers")
+}
+
+model Site {
+  id                  String   @id @default(uuid()) @db.Uuid
+  publisherId         String   @map("publisher_id") @db.Uuid
+  domain              String
+  /// Bearer secret the deployed middleware presents to the internal API
+  /// (GET config / POST transactions) -- not a user-auth credential.
+  /// Database-generated (see the phase6_dashboard_schema migration), so
+  /// Prisma treats it as optional on create rather than requiring the
+  /// caller to supply one.
+  middlewareDeployKey String   @unique @default(dbgenerated("encode(gen_random_bytes(32), 'hex')")) @map("middleware_deploy_key")
+  createdAt           DateTime @default(now()) @map("created_at")
+
+  publisher    Publisher     @relation(fields: [publisherId], references: [id], onDelete: Cascade)
+  pricingRules PricingRule[]
+  policyRules  PolicyRule[]
+  transactions Transaction[]
+
+  @@map("sites")
+}
+
+model PricingRule {
+  id                String   @id @default(uuid()) @db.Uuid
+  siteId            String   @map("site_id") @db.Uuid
+  pathPattern       String   @default("*") @map("path_pattern")
+  /// One of: human, search-crawler, ai-crawler, unknown-bot (enforced by a
+  /// CHECK constraint in Postgres, not a Prisma enum, to match the same
+  /// vocabulary the middleware and WP plugin already use in TS/PHP).
+  botClassification String   @map("bot_classification")
+  priceCents        Int      @map("price_cents")
+  currency          String   @default("USDC")
+  updatedAt         DateTime @default(now()) @map("updated_at")
+
+  site Site @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@map("pricing_rules")
+}
+
+model PolicyRule {
+  id                String @id @default(uuid()) @db.Uuid
+  siteId            String @map("site_id") @db.Uuid
+  botClassification String @map("bot_classification")
+  /// One of: allow, charge, block (CHECK-constrained, see PricingRule note).
+  action            String
+
+  site Site @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@unique([siteId, botClassification])
+  @@map("policy_rules")
+}
+
+/// Written by the middleware via the internal API, read by the dashboard.
+model Transaction {
+  id                String   @id @default(uuid()) @db.Uuid
+  siteId            String   @map("site_id") @db.Uuid
+  url               String
+  botClassification String   @map("bot_classification")
+  amount            String
+  payer             String
+  occurredAt        DateTime @default(now()) @map("occurred_at")
+
+  site Site @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@map("transactions")
+}

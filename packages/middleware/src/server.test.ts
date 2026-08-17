@@ -440,3 +440,79 @@ describe("wordpressUrl (polling WordPress for pricing/policy)", () => {
     });
   });
 });
+
+describe("dashboardUrl (polling the Phase 6 dashboard, takes priority over wordpressUrl)", () => {
+  it("charges using the payTo/price the dashboard reports, and pushes a transaction there on payment", async () => {
+    const dashboardConfig: PublisherConfig = {
+      policy: publisherConfig.policy,
+      pricing: {
+        network: "base-sepolia",
+        asset: "USDC",
+        maxAmountRequired: "77777",
+        payTo: "0xFROMDASHBOARD000000000000000000000000",
+        maxTimeoutSeconds: 60,
+      },
+    };
+    const pushedTransactions: unknown[] = [];
+
+    const fetchImpl: typeof fetch = async (input, init) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("/api/v1/config")) {
+        expect((init?.headers as Record<string, string>).authorization).toBe(
+          "Bearer dashboard-deploy-key",
+        );
+        return new Response(JSON.stringify(dashboardConfig), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("/api/v1/transactions")) {
+        pushedTransactions.push(JSON.parse(init?.body as string));
+        return new Response(JSON.stringify({ status: "ok" }), { status: 201 });
+      }
+      return fetch(input, init);
+    };
+
+    const app = buildTestServer({
+      publisherConfig: undefined,
+      wordpressUrl: "https://wordpress.example.test", // must be ignored -- dashboardUrl wins
+      dashboardUrl: "https://dashboard.example.test",
+      dashboardDeployKey: "dashboard-deploy-key",
+      fetchImpl,
+      // Deliberately not overridden with a NoopTransactionLog like other
+      // tests: this exercises buildServer()'s real default composite,
+      // which is what actually wires DashboardTransactionLog in. Postgres
+      // isn't reachable in this test env, so PostgresTransactionLog's arm
+      // of the Promise.all will reject -- caught by server.ts same as
+      // production, and doesn't stop Console/DashboardTransactionLog from
+      // still running.
+      transactionLog: undefined,
+    });
+
+    await vi.waitFor(async () => {
+      const response = await app.inject({
+        method: "GET",
+        url: "/premium-article.html",
+        headers: { "user-agent": GPTBOT_UA },
+      });
+      expect(response.json().accepts[0].payTo).toBe("0xFROMDASHBOARD000000000000000000000000");
+    });
+
+    const proof: PaymentProof = {
+      x402Version: 1,
+      scheme: "exact",
+      network: "base-sepolia",
+      nonce: "dashboard-wiring-nonce",
+      payload: {},
+    };
+    const paid = await app.inject({
+      method: "GET",
+      url: "/premium-article.html",
+      headers: { "user-agent": GPTBOT_UA, "x-payment": encodePaymentHeader(proof) },
+    });
+    expect(paid.statusCode).toBe(200);
+
+    await vi.waitFor(() => expect(pushedTransactions).toHaveLength(1));
+    expect(pushedTransactions[0]).toMatchObject({ botClassification: "ai-crawler" });
+  });
+});

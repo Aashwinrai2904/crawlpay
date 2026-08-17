@@ -18,6 +18,7 @@ import {
   type LockStore,
 } from "./cache";
 import { loadPublisherConfig, type PublisherConfig } from "./config/publisher-config";
+import { DashboardPublisherConfigSource } from "./config/dashboard-publisher-config-source";
 import {
   StaticPublisherConfigSource,
   WordPressPublisherConfigSource,
@@ -28,6 +29,7 @@ import { fetchFromOrigin, normalizeHeaders, publicUrlFor, respondWithOrigin } fr
 import {
   CompositeTransactionLog,
   ConsoleTransactionLog,
+  DashboardTransactionLog,
   PostgresTransactionLog,
   transactionMetrics,
   type TransactionLog,
@@ -51,10 +53,21 @@ export interface BuildServerOptions {
    * Base URL of the WordPress site to poll GET /wp-json/crawlpay/v1/config
    * from, so payTo/pricing/policy set on Settings > CrawlPay actually take
    * effect here instead of the local publisher-config.json placeholder.
-   * Defaults to CRAWLPAY_WORDPRESS_URL; if neither is set, falls back to
-   * the local file and never polls.
+   * Defaults to CRAWLPAY_WORDPRESS_URL. Ignored if dashboardUrl is set.
    */
   wordpressUrl?: string;
+  /**
+   * Base URL of the Phase 6 publisher dashboard to poll GET /api/v1/config
+   * from (see that site's Setup page for the URL + deploy key). Takes
+   * priority over wordpressUrl when both are set — a site is expected to
+   * be managed by one or the other, not both. Defaults to
+   * CRAWLPAY_DASHBOARD_URL; requires dashboardDeployKey (or
+   * CRAWLPAY_DASHBOARD_DEPLOY_KEY) to also be set, otherwise it's ignored
+   * and wordpressUrl/the local file apply instead.
+   */
+  dashboardUrl?: string;
+  /** Bearer secret for dashboardUrl's internal API. Defaults to CRAWLPAY_DASHBOARD_DEPLOY_KEY. */
+  dashboardDeployKey?: string;
   botSignatureConfig?: BotSignatureConfig;
   cacheStore?: CacheStore & LockStore;
   nonceStore?: NonceStore;
@@ -90,12 +103,21 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
   const cacheStore = options.cacheStore ?? new InMemoryCacheStore();
   const nonceStore = options.nonceStore ?? new InMemoryNonceStore();
   const facilitatorClient = options.facilitatorClient ?? new FacilitatorClient();
-  const transactionLog =
-    options.transactionLog ??
-    new CompositeTransactionLog([new ConsoleTransactionLog(), new PostgresTransactionLog()]);
   const fetchImpl = options.fetchImpl ?? fetch;
   const siteKey = options.siteKey ?? process.env.CRAWLPAY_SITE_KEY;
   const wordpressUrl = options.wordpressUrl ?? process.env.CRAWLPAY_WORDPRESS_URL;
+  const dashboardUrl = options.dashboardUrl ?? process.env.CRAWLPAY_DASHBOARD_URL;
+  const dashboardDeployKey = options.dashboardDeployKey ?? process.env.CRAWLPAY_DASHBOARD_DEPLOY_KEY;
+
+  const transactionLog =
+    options.transactionLog ??
+    new CompositeTransactionLog([
+      new ConsoleTransactionLog(),
+      new PostgresTransactionLog(),
+      ...(dashboardUrl && dashboardDeployKey
+        ? [new DashboardTransactionLog({ dashboardUrl, deployKey: dashboardDeployKey, fetchImpl })]
+        : []),
+    ]);
 
   const app = Fastify({ logger: options.logger ?? true });
 
@@ -103,15 +125,23 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
     options.publisherConfigSource ??
     (options.publisherConfig
       ? new StaticPublisherConfigSource(options.publisherConfig)
-      : wordpressUrl
-        ? new WordPressPublisherConfigSource({
-            wordpressUrl,
-            siteKey,
+      : dashboardUrl && dashboardDeployKey
+        ? new DashboardPublisherConfigSource({
+            dashboardUrl,
+            deployKey: dashboardDeployKey,
             fallback: loadPublisherConfig(),
             fetchImpl,
-            onPollError: (err) => app.log.warn({ err }, "failed to poll WordPress config"),
+            onPollError: (err) => app.log.warn({ err }, "failed to poll dashboard config"),
           })
-        : new StaticPublisherConfigSource(loadPublisherConfig()));
+        : wordpressUrl
+          ? new WordPressPublisherConfigSource({
+              wordpressUrl,
+              siteKey,
+              fallback: loadPublisherConfig(),
+              fetchImpl,
+              onPollError: (err) => app.log.warn({ err }, "failed to poll WordPress config"),
+            })
+          : new StaticPublisherConfigSource(loadPublisherConfig()));
 
   app.addHook("onClose", (_instance, done) => {
     publisherConfigSource.stop?.();

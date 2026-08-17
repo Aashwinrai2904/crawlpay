@@ -10,7 +10,7 @@ boot its local infra cleanly.
 ```
 /packages/core         shared TypeScript types, x402 protocol schemas (zod), generic utils
 /packages/middleware   Node/Fastify reverse-proxy middleware — Phase 1-4 work lands here
-/packages/dashboard    Next.js 14 (App Router) publisher dashboard — Phase 6-7 work lands here
+/packages/dashboard    Next.js 14 (App Router) publisher dashboard (Phase 6) — see its own README
 /packages/wp-plugin    PHP WordPress plugin — Phase 5 work lands here (not part of the TS workspace)
 /infra                 docker-compose.yml + Dockerfiles for local dev infra
 ```

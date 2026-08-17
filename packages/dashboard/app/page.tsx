@@ -1,10 +1,11 @@
-import { CORE_VERSION } from "@crawlpay/core";
+import { redirect } from "next/navigation";
+import { createClient } from "@/lib/supabase/server";
 
-export default function HomePage() {
-  return (
-    <main>
-      <h1>Crawlpay</h1>
-      <p>Publisher dashboard — scaffolding phase (core v{CORE_VERSION}).</p>
-    </main>
-  );
+export default async function HomePage() {
+  const supabase = createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  redirect(user ? "/dashboard" : "/login");
 }
