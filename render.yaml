@@ -44,5 +44,50 @@ services:
       # it last fetched successfully, falling back to the local
       # publisher-config.json placeholder until the first poll succeeds.
       # Update this if the WordPress site's URL ever changes.
+      # Only consulted if CRAWLPAY_DASHBOARD_URL below isn't set.
       - key: CRAWLPAY_WORDPRESS_URL
         value: https://cpayplugin.s6-tastewp.com
+      # Phase 6: if this site is managed from the publisher dashboard
+      # instead of (or in addition to) WordPress, set all three of these to
+      # what that site's Setup page shows -- CRAWLPAY_DASHBOARD_URL takes
+      # priority over CRAWLPAY_WORDPRESS_URL above when both are set. Leave
+      # unset (the default here) to keep using WordPress/the local file.
+      - key: CRAWLPAY_DASHBOARD_URL
+        sync: false
+      - key: CRAWLPAY_SITE_ID
+        sync: false
+      - key: CRAWLPAY_DEPLOY_KEY
+        sync: false
+
+  # Publisher dashboard (Phase 6). Needs its own Postgres (CRAWLPAY_DATABASE_URL,
+  # provisioned separately -- Render's managed Postgres or similar) and an
+  # SMTP server for magic-link emails; both are secrets, so they're left
+  # unset here rather than committed to this public repo. Run
+  # `pnpm --filter @crawlpay/dashboard db:deploy` once against that database
+  # before the first deploy.
+  - type: web
+    name: crawlpay-dashboard
+    runtime: node
+    plan: free
+    region: oregon
+    buildCommand: npm install -g pnpm@11.21.0 && pnpm install --frozen-lockfile && pnpm --filter @crawlpay/dashboard build
+    startCommand: pnpm --filter @crawlpay/dashboard start
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: CRAWLPAY_DATABASE_URL
+        sync: false
+      - key: NEXTAUTH_URL
+        value: https://crawlpay-dashboard.onrender.com
+      - key: NEXTAUTH_SECRET
+        generateValue: true
+      - key: EMAIL_SERVER_HOST
+        sync: false
+      - key: EMAIL_SERVER_PORT
+        value: "587"
+      - key: EMAIL_SERVER_USER
+        sync: false
+      - key: EMAIL_SERVER_PASSWORD
+        sync: false
+      - key: EMAIL_FROM
+        sync: false

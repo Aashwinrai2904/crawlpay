@@ -1,10 +1,9 @@
-import { CORE_VERSION } from "@crawlpay/core";
+import Link from "next/link";
+import { getServerSession } from "next-auth";
+import { redirect } from "next/navigation";
+import { authOptions } from "../lib/auth";
 
-export default function HomePage() {
-  return (
-    <main>
-      <h1>Crawlpay</h1>
-      <p>Publisher dashboard — scaffolding phase (core v{CORE_VERSION}).</p>
-    </main>
-  );
+export default async function HomePage() {
+  const session = await getServerSession(authOptions);
+  redirect(session?.user ? "/dashboard" : "/auth/signin");
 }

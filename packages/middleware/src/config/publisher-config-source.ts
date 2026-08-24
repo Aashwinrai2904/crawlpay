@@ -1,6 +1,7 @@
 import { PublisherConfigSchema, type PublisherConfig } from "./publisher-config";
 
 const SITE_KEY_HEADER = "x-crawlpay-site-key";
+const DEPLOY_KEY_HEADER = "x-crawlpay-deploy-key";
 const DEFAULT_POLL_INTERVAL_MS = 30_000;
 
 export interface PublisherConfigSource {
@@ -86,6 +87,88 @@ export class WordPressPublisherConfigSource implements PublisherConfigSource {
       const response = await this.fetchImpl(this.endpoint, { headers });
       if (!response.ok) {
         this.onPollError(new Error(`WordPress config endpoint returned ${response.status}`));
+        return;
+      }
+      this.current = PublisherConfigSchema.parse(await response.json());
+    } catch (err) {
+      this.onPollError(err);
+    }
+  }
+}
+
+export interface DashboardPublisherConfigSourceOptions {
+  /** Base URL of the phase 6 publisher dashboard, e.g. "https://dashboard.crawlpay.com". */
+  dashboardUrl: string;
+  /** This site's id in the dashboard's database. */
+  siteId: string;
+  /** Sent as X-Crawlpay-Deploy-Key; must match the site's middlewareDeployKey in the dashboard. */
+  deployKey: string;
+  /** Served until the first poll succeeds, and again if every subsequent poll fails. */
+  fallback: PublisherConfig;
+  fetchImpl?: typeof fetch;
+  pollIntervalMs?: number;
+  onPollError?: (err: unknown) => void;
+}
+
+/**
+ * Polls the phase 6 dashboard's GET /api/internal/sites/:siteId/config on an
+ * interval and serves whatever it last fetched successfully — this is how
+ * pricing/policy set on the dashboard's Pricing page actually reaches the
+ * middleware instead of the local publisher-config.json placeholder, for
+ * publishers using the dashboard rather than (or in addition to) the
+ * WordPress plugin's own config page.
+ *
+ * Same fail-open shape as WordPressPublisherConfigSource: getConfig() is
+ * always synchronous and never blocks a request on the dashboard being
+ * reachable. Before the first poll completes, and whenever the dashboard is
+ * unreachable or returns something that doesn't parse, it keeps serving the
+ * last-known-good config (starting from `fallback`, which server.ts wires
+ * up to the local file) — a dashboard outage degrades to stale pricing, not
+ * a broken site.
+ */
+export class DashboardPublisherConfigSource implements PublisherConfigSource {
+  private current: PublisherConfig;
+  private readonly endpoint: string;
+  private readonly deployKey: string;
+  private readonly fetchImpl: typeof fetch;
+  private readonly onPollError: (err: unknown) => void;
+  private readonly timer: ReturnType<typeof setInterval>;
+
+  constructor(options: DashboardPublisherConfigSourceOptions) {
+    this.current = options.fallback;
+    this.endpoint = new URL(
+      `/api/internal/sites/${options.siteId}/config`,
+      options.dashboardUrl,
+    ).toString();
+    this.deployKey = options.deployKey;
+    this.fetchImpl = options.fetchImpl ?? fetch;
+    this.onPollError =
+      options.onPollError ??
+      ((err) => console.error("[crawlpay] failed to poll dashboard config:", err));
+
+    void this.poll();
+    this.timer = setInterval(
+      () => void this.poll(),
+      options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS,
+    );
+    this.timer.unref?.();
+  }
+
+  getConfig(): PublisherConfig {
+    return this.current;
+  }
+
+  stop(): void {
+    clearInterval(this.timer);
+  }
+
+  private async poll(): Promise<void> {
+    try {
+      const response = await this.fetchImpl(this.endpoint, {
+        headers: { [DEPLOY_KEY_HEADER]: this.deployKey },
+      });
+      if (!response.ok) {
+        this.onPollError(new Error(`dashboard config endpoint returned ${response.status}`));
         return;
       }
       this.current = PublisherConfigSchema.parse(await response.json());

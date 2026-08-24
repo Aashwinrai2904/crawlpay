@@ -1,17 +1,17 @@
 # crawlpay
 
 Lets publishers charge AI crawlers per request over the [x402](https://www.x402.org/) protocol.
-This repo is scaffolding only — no business logic yet. See `unlapsed-product-spec-v1.md`-style
-phase docs elsewhere for the roadmap; this tree just needs to build, lint, typecheck, test, and
-boot its local infra cleanly.
+Phases 0-6 are implemented: bot detection + caching + payment middleware (Phase 1-4), a WordPress
+plugin (Phase 5), and a Next.js publisher dashboard (Phase 6) backed by Postgres/Prisma. Dynamic
+pricing (Phase 7) and a security review (Phase 8) are still ahead.
 
 ## Layout
 
 ```
 /packages/core         shared TypeScript types, x402 protocol schemas (zod), generic utils
-/packages/middleware   Node/Fastify reverse-proxy middleware — Phase 1-4 work lands here
-/packages/dashboard    Next.js 14 (App Router) publisher dashboard — Phase 6-7 work lands here
-/packages/wp-plugin    PHP WordPress plugin — Phase 5 work lands here (not part of the TS workspace)
+/packages/middleware   Node/Fastify reverse-proxy middleware — Phase 1-4
+/packages/dashboard    Next.js 14 (App Router) publisher dashboard — Phase 6, Prisma/Postgres-backed
+/packages/wp-plugin    PHP WordPress plugin — Phase 5 (not part of the TS workspace)
 /infra                 docker-compose.yml + Dockerfiles for local dev infra
 ```
 
@@ -44,10 +44,12 @@ Start Redis, Postgres, and the two mock services:
 docker compose -f infra/docker-compose.yml up
 ```
 
-In another terminal, install dependencies and start the app packages (middleware + dashboard):
+In another terminal, install dependencies, apply the dashboard's Prisma schema, and start the app
+packages (middleware + dashboard):
 
 ```bash
 pnpm install
+pnpm --filter @crawlpay/dashboard db:migrate
 pnpm dev
 ```
 
@@ -55,6 +57,22 @@ pnpm dev
 - Dashboard: http://localhost:3000
 - Mock origin: http://localhost:4000
 - Mock facilitator: http://localhost:4100
+
+## Dashboard (Phase 6)
+
+`packages/dashboard` is the publisher-facing SaaS surface: email magic-link sign-in (NextAuth),
+Postgres via Prisma (`packages/dashboard/prisma/schema.prisma`), pages to view revenue/traffic and
+manage pricing/policy per site, and a small internal API
+(`app/api/internal/sites/[siteId]/{config,transactions}`) the middleware calls instead of reading
+`publisher-config.json` or only `console.log`-ing transactions.
+
+Copy `packages/dashboard/.env.example` to `.env` and fill in an SMTP server (for magic-link
+emails) and `NEXTAUTH_SECRET` (`openssl rand -base64 32`) before running it locally. The internal
+API is authenticated by a per-site deploy key (shown on a site's Setup page), not by NextAuth —
+see that page for the middleware env vars (`CRAWLPAY_DASHBOARD_URL`, `CRAWLPAY_SITE_ID`,
+`CRAWLPAY_DEPLOY_KEY`) that connect the two. If the dashboard is unreachable, the middleware keeps
+serving the last config it fetched, then falls back to the local JSON file — a dashboard outage
+never takes a site down.
 
 ## Scripts
 
