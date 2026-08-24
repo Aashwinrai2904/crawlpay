@@ -19,6 +19,7 @@ import {
 } from "./cache";
 import { loadPublisherConfig, type PublisherConfig } from "./config/publisher-config";
 import {
+  DashboardPublisherConfigSource,
   StaticPublisherConfigSource,
   WordPressPublisherConfigSource,
   type PublisherConfigSource,
@@ -28,6 +29,7 @@ import { fetchFromOrigin, normalizeHeaders, publicUrlFor, respondWithOrigin } fr
 import {
   CompositeTransactionLog,
   ConsoleTransactionLog,
+  HttpTransactionLog,
   PostgresTransactionLog,
   transactionMetrics,
   type TransactionLog,
@@ -40,19 +42,40 @@ export interface BuildServerOptions {
   originBaseUrl?: string;
   /**
    * A fixed policy/pricing config, used as-is for the server's lifetime.
-   * Ignored if publisherConfigSource is given. If neither is given and
-   * wordpressUrl (or CRAWLPAY_WORDPRESS_URL) is set, the server instead
-   * polls WordPress for config that can change at runtime.
+   * Ignored if publisherConfigSource is given. If neither is given, the
+   * server picks a live source in this order: the phase 6 dashboard
+   * (dashboardUrl/CRAWLPAY_DASHBOARD_URL), then WordPress
+   * (wordpressUrl/CRAWLPAY_WORDPRESS_URL), then the local file.
    */
   publisherConfig?: PublisherConfig;
-  /** Full control over where policy/pricing comes from; overrides publisherConfig and wordpressUrl. */
+  /** Full control over where policy/pricing comes from; overrides publisherConfig, dashboardUrl, and wordpressUrl. */
   publisherConfigSource?: PublisherConfigSource;
+  /**
+   * Base URL of the phase 6 publisher dashboard to poll
+   * GET /api/internal/sites/:siteId/config from, so pricing/policy set on
+   * its Pricing page take effect here instead of the local
+   * publisher-config.json placeholder. Defaults to CRAWLPAY_DASHBOARD_URL;
+   * requires siteId and deployKey (or their env var equivalents) to also be
+   * set, otherwise this is ignored and wordpressUrl/the local file are used
+   * instead. Falls back to the last-known-good config, then to the local
+   * file, if the dashboard is ever unreachable.
+   */
+  dashboardUrl?: string;
+  /** This site's id in the dashboard's database. Defaults to CRAWLPAY_SITE_ID. */
+  siteId?: string;
+  /**
+   * Shared secret matching the site's middlewareDeployKey in the dashboard,
+   * sent as X-Crawlpay-Deploy-Key to its internal API (both for polling
+   * config and for pushing transactions). Defaults to CRAWLPAY_DEPLOY_KEY.
+   */
+  deployKey?: string;
   /**
    * Base URL of the WordPress site to poll GET /wp-json/crawlpay/v1/config
    * from, so payTo/pricing/policy set on Settings > CrawlPay actually take
    * effect here instead of the local publisher-config.json placeholder.
-   * Defaults to CRAWLPAY_WORDPRESS_URL; if neither is set, falls back to
-   * the local file and never polls.
+   * Defaults to CRAWLPAY_WORDPRESS_URL; only consulted if dashboardUrl
+   * isn't configured. If neither is set, falls back to the local file and
+   * never polls.
    */
   wordpressUrl?: string;
   botSignatureConfig?: BotSignatureConfig;
@@ -90,12 +113,29 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
   const cacheStore = options.cacheStore ?? new InMemoryCacheStore();
   const nonceStore = options.nonceStore ?? new InMemoryNonceStore();
   const facilitatorClient = options.facilitatorClient ?? new FacilitatorClient();
-  const transactionLog =
-    options.transactionLog ??
-    new CompositeTransactionLog([new ConsoleTransactionLog(), new PostgresTransactionLog()]);
   const fetchImpl = options.fetchImpl ?? fetch;
   const siteKey = options.siteKey ?? process.env.CRAWLPAY_SITE_KEY;
   const wordpressUrl = options.wordpressUrl ?? process.env.CRAWLPAY_WORDPRESS_URL;
+  // Fully configured only once dashboardUrl, siteId, and deployKey are all
+  // present -- a partially-set trio (e.g. dashboardUrl with no siteId yet)
+  // falls through to WordPress/the local file rather than polling a
+  // malformed endpoint.
+  const dashboardUrlValue = options.dashboardUrl ?? process.env.CRAWLPAY_DASHBOARD_URL;
+  const siteIdValue = options.siteId ?? process.env.CRAWLPAY_SITE_ID;
+  const deployKeyValue = options.deployKey ?? process.env.CRAWLPAY_DEPLOY_KEY;
+  const dashboard =
+    dashboardUrlValue && siteIdValue && deployKeyValue
+      ? { dashboardUrl: dashboardUrlValue, siteId: siteIdValue, deployKey: deployKeyValue }
+      : null;
+
+  const transactionLog =
+    options.transactionLog ??
+    new CompositeTransactionLog([
+      new ConsoleTransactionLog(),
+      dashboard
+        ? new HttpTransactionLog({ ...dashboard, fetchImpl })
+        : new PostgresTransactionLog(),
+    ]);
 
   const app = Fastify({ logger: options.logger ?? true });
 
@@ -103,15 +143,22 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
     options.publisherConfigSource ??
     (options.publisherConfig
       ? new StaticPublisherConfigSource(options.publisherConfig)
-      : wordpressUrl
-        ? new WordPressPublisherConfigSource({
-            wordpressUrl,
-            siteKey,
+      : dashboard
+        ? new DashboardPublisherConfigSource({
+            ...dashboard,
             fallback: loadPublisherConfig(),
             fetchImpl,
-            onPollError: (err) => app.log.warn({ err }, "failed to poll WordPress config"),
+            onPollError: (err) => app.log.warn({ err }, "failed to poll dashboard config"),
           })
-        : new StaticPublisherConfigSource(loadPublisherConfig()));
+        : wordpressUrl
+          ? new WordPressPublisherConfigSource({
+              wordpressUrl,
+              siteKey,
+              fallback: loadPublisherConfig(),
+              fetchImpl,
+              onPollError: (err) => app.log.warn({ err }, "failed to poll WordPress config"),
+            })
+          : new StaticPublisherConfigSource(loadPublisherConfig()));
 
   app.addHook("onClose", (_instance, done) => {
     publisherConfigSource.stop?.();

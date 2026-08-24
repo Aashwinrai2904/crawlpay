@@ -67,6 +67,27 @@ was flagged in.
 - **Risk:** All three endpoints only require the `X-Crawlpay-Site-Key` shared secret if one has been configured; with none set (the out-of-the-box default), they're fully open. `/stats` and the REST config endpoint leak revenue/traffic data and pricing/payout-address configuration; `/verify-and-price` can be hit directly by anyone to trigger real facilitator verification calls and nonce consumption, bypassing WordPress's own classification entirely.
 - **Suggested fix:** Consider making the site key mandatory (refuse to serve these routes at all without one configured) rather than silently falling back to open, at least for production-flagged deployments.
 
+### 9. Dashboard's internal transactions endpoint trusts the middleware's report as-is
+
+- **File/function:** `packages/dashboard/app/api/internal/sites/[siteId]/transactions/route.ts`
+- **Flagged in:** Phase 6
+- **Risk:** Once a request presents a valid deploy key, `POST .../transactions` writes whatever `amount`/`payer`/`botClassification` it's given straight into the revenue numbers the overview page shows — there's no re-verification against the x402 facilitator (unlike the middleware's own `resolveCharge()`, which does verify before ever calling this endpoint) and no rate limiting. A leaked deploy key (see item 10) lets an attacker fabricate arbitrary revenue history or just flood the table.
+- **Suggested fix:** At minimum rate-limit this route per site; consider having the middleware forward the facilitator's verification response so the dashboard can spot-check it rather than trusting the report outright.
+
+### 10. Deploy key is a long-lived plaintext shared secret, same shape as CRAWLPAY_SITE_KEY
+
+- **File/function:** `packages/dashboard/prisma/schema.prisma` (`Site.middlewareDeployKey`), `packages/dashboard/lib/internal-auth.ts`
+- **Flagged in:** Phase 6
+- **Risk:** Same category of risk as item 8's `CRAWLPAY_SITE_KEY` (open-by-default endpoints), except this key can't be left unset — it's the only thing guarding the config-pull and transaction-push routes. It's stored in plaintext in Postgres and shown in plaintext on the Setup page with no expiry; the Setup page does offer a regenerate action, but nothing prompts rotation and a compromised key is only noticed manually.
+- **Suggested fix:** Hash the key at rest (compare by hash, not plaintext) and consider an expiry/rotation reminder.
+
+### 11. price_cents → x402 atomic units assumes a fixed 6-decimal asset
+
+- **File/function:** `packages/dashboard/lib/site-config.ts` — `ASSET_DECIMALS`, `centsToAtomicUnits()`
+- **Flagged in:** Phase 6
+- **Risk:** `Site.asset` is a free-text field (matching the WordPress plugin's own settings page), but the cents-to-atomic-units conversion hardcodes 6 decimals (correct for USDC, the only asset this product currently supports). If a site's `asset` were ever changed to something with different decimals without also updating this constant, every request would be silently mis-priced.
+- **Suggested fix:** Either constrain `asset` to a small enum of supported assets with known decimals, or store decimals alongside the asset and thread it through instead of a hardcoded constant.
+
 ## Resolved items
 
 _(none yet)_

@@ -1,0 +1,169 @@
+// Prisma schema for the Phase 6 publisher dashboard. This is the database
+// that replaces packages/middleware/config/publisher-config.json as the
+// source of truth for policy/pricing, and the destination for transaction
+// records the middleware used to only console.log.
+//
+// The "User" model below IS the Publisher from the phase 6 spec (id, email,
+// wallet_address, created_at) — NextAuth's PrismaAdapter hardcodes the
+// model name "User" (and "Account"/"Session"/"VerificationToken"), so
+// rather than keep a separate one-to-one Publisher table we extend the
+// adapter's own User model with the extra publisher fields and map its
+// table to `publishers` for clarity. One authenticated user = one
+// publisher account, same as the spec asks for.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("CRAWLPAY_DATABASE_URL")
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  emailVerified DateTime? @map("email_verified")
+  name          String?
+  image         String?
+  walletAddress String?   @map("wallet_address")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  accounts Account[]
+  sessions Session[]
+  sites    Site[]
+
+  @@map("publishers")
+}
+
+// --- NextAuth (Email magic-link) adapter models ---------------------------
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String  @map("user_id")
+  type              String
+  provider          String
+  providerAccountId String  @map("provider_account_id")
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique @map("session_token")
+  userId       String   @map("user_id")
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+// --- Publisher-owned data ---------------------------------------------------
+
+model Site {
+  id          String @id @default(cuid())
+  publisherId String @map("publisher_id")
+  publisher   User   @relation(fields: [publisherId], references: [id], onDelete: Cascade)
+  domain      String
+
+  // Shared secret the middleware presents (as X-Crawlpay-Deploy-Key) to the
+  // internal API below — this is the "middleware_deploy_key" from the phase
+  // 6 spec. Not a user-auth credential: it authenticates a site's
+  // middleware instance, not a person.
+  middlewareDeployKey String @unique @default(cuid()) @map("middleware_deploy_key")
+
+  // x402 payment parameters that aren't per-rule in the phase 4 middleware
+  // (a single flat PricingConfig, not per-classification/per-path) and
+  // don't fit PricingRule's (path_pattern, bot_classification, price_cents)
+  // shape. Mirrors the WordPress plugin's Settings > CrawlPay page, which
+  // keeps these same three fields site-wide rather than per rule.
+  network           String @default("base-sepolia")
+  asset             String @default("USDC")
+  maxTimeoutSeconds Int    @default(60) @map("max_timeout_seconds")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  pricingRules PricingRule[]
+  policyRules  PolicyRule[]
+  transactions Transaction[]
+
+  @@map("sites")
+}
+
+// (path_pattern, bot_classification) pairs beyond the site's catch-all
+// ("*", "ai-crawler") row are stored and manageable here but not yet
+// consumed by the middleware's flat-pricing model — same "accepted but not
+// wired up yet" status as the WordPress plugin's per-post overrides.
+// Dynamic/automatic pricing is explicitly Phase 7.
+model PricingRule {
+  id     String @id @default(cuid())
+  siteId String @map("site_id")
+  site   Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  pathPattern       String @default("*") @map("path_pattern")
+  botClassification String @default("ai-crawler") @map("bot_classification")
+  priceCents        Int    @map("price_cents")
+  currency          String @default("usd")
+
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([siteId, pathPattern, botClassification])
+  @@map("pricing_rules")
+}
+
+// One row per bot classification per site (human / search-crawler /
+// ai-crawler / unknown-bot) — replaces bot-policy.json's flat object.
+model PolicyRule {
+  id     String @id @default(cuid())
+  siteId String @map("site_id")
+  site   Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  botClassification String @map("bot_classification")
+  action            String
+
+  @@unique([siteId, botClassification])
+  @@map("policy_rules")
+}
+
+// Written by the middleware via POST /api/internal/sites/:siteId/transactions
+// (see app/api/internal), read by the dashboard's overview page. Mapped to a
+// table name distinct from the middleware's own legacy `transactions` table
+// (packages/middleware/src/transactions/postgres-transaction-log.ts) so the
+// two can never collide if they're ever pointed at the same Postgres
+// instance — that fallback path writes directly to Postgres with no site_id
+// and is only used when a site has no dashboard configured at all.
+model Transaction {
+  id     String @id @default(cuid())
+  siteId String @map("site_id")
+  site   Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  url               String
+  botClassification String @map("bot_classification")
+  amount            String
+  payer             String
+
+  occurredAt DateTime @default(now()) @map("occurred_at")
+
+  @@index([siteId, occurredAt])
+  @@map("dashboard_transactions")
+}
