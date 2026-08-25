@@ -1,28 +1,26 @@
+import { getServerSession } from "next-auth";
 import { redirect } from "next/navigation";
+import { authOptions } from "./auth-options";
 import { prisma } from "./prisma";
-import { createClient } from "./supabase/server";
 
 /**
- * Every dashboard page under /dashboard calls this first. The
- * on_auth_user_created trigger provisions a Publisher row on first
- * sign-in, so the upsert here is a fallback (a session predating the
- * trigger, or a rare race), not the normal path.
+ * Every dashboard page under /dashboard calls this first. There's no
+ * database trigger provisioning a Publisher row on sign-in (NextAuth's
+ * Prisma adapter only knows about its own User table), so the upsert here
+ * is the only place a Publisher row gets created -- not just a fallback.
  */
 export async function requirePublisher() {
-  const supabase = createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const session = await getServerSession(authOptions);
 
-  if (!user) {
+  if (!session?.user?.id) {
     redirect("/login");
   }
 
   const publisher = await prisma.publisher.upsert({
-    where: { id: user.id },
+    where: { userId: session.user.id },
     update: {},
-    create: { id: user.id },
+    create: { userId: session.user.id },
   });
 
-  return { user, publisher };
+  return { user: session.user, publisher };
 }

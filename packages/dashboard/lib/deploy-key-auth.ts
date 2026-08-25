@@ -4,7 +4,7 @@ import { prisma } from "./prisma";
  * Resolves the Site a middleware deploy key belongs to, or null if the
  * `Authorization: Bearer <key>` header is missing/doesn't match any site.
  * This is a bearer-secret credential (like the WP plugin's site key), not
- * a Supabase Auth session -- callers are the deployed middleware servers,
+ * a user-auth session -- callers are the deployed middleware servers,
  * not browsers.
  */
 export async function siteForDeployKey(request: Request) {
