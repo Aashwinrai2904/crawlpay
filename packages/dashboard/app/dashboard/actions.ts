@@ -1,5 +1,6 @@
 "use server";
 
+import { randomBytes } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { requirePublisher } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
@@ -21,7 +22,11 @@ export async function createSite(formData: FormData): Promise<void> {
   const { publisher } = await requirePublisher();
 
   const site = await prisma.site.create({
-    data: { publisherId: publisher.id, domain },
+    data: {
+      publisherId: publisher.id,
+      domain,
+      middlewareDeployKey: randomBytes(32).toString("hex"),
+    },
   });
 
   await prisma.policyRule.createMany({

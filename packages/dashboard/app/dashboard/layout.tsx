@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { SignOutButton } from "@/components/SignOutButton";
 import { requirePublisher } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
@@ -35,9 +36,7 @@ export default async function DashboardLayout({ children }: { children: ReactNod
         </div>
         <div style={{ display: "flex", gap: "1rem", alignItems: "center" }}>
           <span style={{ color: "#666", fontSize: "0.875rem" }}>{user.email}</span>
-          <form action="/auth/signout" method="post">
-            <button type="submit">Sign out</button>
-          </form>
+          <SignOutButton />
         </div>
       </header>
       <main style={{ padding: "1.5rem" }}>{children}</main>

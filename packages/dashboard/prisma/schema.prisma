@@ -1,9 +1,7 @@
-// Schema mirrors the tables created directly in Supabase (see the
-// `phase6_dashboard_schema` / `phase6_app_role` migrations run through the
-// Supabase MCP tools) rather than through `prisma migrate`. Keep this file
-// and that SQL in sync by hand -- running `prisma migrate` against this
-// database would fight Supabase's own migration history for tables it
-// doesn't know it created.
+// Tracked as real Prisma migrations (see prisma/migrations/) against a
+// plain Postgres -- no platform-specific hand-applied SQL to keep in sync
+// by hand anymore. Run `prisma migrate deploy` against a fresh database to
+// stand up this schema from scratch.
 generator client {
   provider = "prisma-client-js"
 }
@@ -13,28 +11,90 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// One row per Supabase Auth user (auth.users), created automatically by
-// the on_auth_user_created trigger on first magic-link sign-in.
+// --- NextAuth (Email/magic-link provider), via @next-auth/prisma-adapter.
+// Session strategy is JWT (see lib/auth-options.ts), so Session/Account are
+// only used for the adapter's bookkeeping and OAuth-account linking (not
+// used yet, no OAuth providers configured); VerificationToken stores the
+// short-lived magic-link tokens the Email provider issues.
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String?   @unique
+  emailVerified DateTime? @map("email_verified")
+  image         String?
+
+  accounts  Account[]
+  sessions  Session[]
+  publisher Publisher?
+
+  @@map("users")
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String  @map("user_id")
+  type              String
+  provider          String
+  providerAccountId String  @map("provider_account_id")
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique @map("session_token")
+  userId       String   @map("user_id")
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+// --- App tables
+
 model Publisher {
-  id            String   @id @db.Uuid
+  id            String   @id @default(cuid())
+  userId        String   @unique @map("user_id")
   walletAddress String?  @map("wallet_address")
   createdAt     DateTime @default(now()) @map("created_at")
 
+  user  User   @relation(fields: [userId], references: [id], onDelete: Cascade)
   sites Site[]
 
   @@map("publishers")
 }
 
 model Site {
-  id                  String   @id @default(uuid()) @db.Uuid
-  publisherId         String   @map("publisher_id") @db.Uuid
-  domain              String
+  id          String @id @default(cuid())
+  publisherId String @map("publisher_id")
+  domain      String
+
   /// Bearer secret the deployed middleware presents to the internal API
   /// (GET config / POST transactions) -- not a user-auth credential.
-  /// Database-generated (see the phase6_dashboard_schema migration), so
-  /// Prisma treats it as optional on create rather than requiring the
-  /// caller to supply one.
-  middlewareDeployKey String   @unique @default(dbgenerated("encode(gen_random_bytes(32), 'hex')")) @map("middleware_deploy_key")
+  /// Generated in application code at creation time (crypto.randomBytes),
+  /// not a database default, so it doesn't depend on a Postgres extension
+  /// (e.g. pgcrypto) being enabled on whatever provider hosts this.
+  middlewareDeployKey String   @unique @map("middleware_deploy_key")
   createdAt           DateTime @default(now()) @map("created_at")
 
   publisher    Publisher     @relation(fields: [publisherId], references: [id], onDelete: Cascade)
@@ -46,9 +106,10 @@ model Site {
 }
 
 model PricingRule {
-  id                String   @id @default(uuid()) @db.Uuid
-  siteId            String   @map("site_id") @db.Uuid
-  pathPattern       String   @default("*") @map("path_pattern")
+  id          String @id @default(cuid())
+  siteId      String @map("site_id")
+  pathPattern String @default("*") @map("path_pattern")
+
   /// One of: human, search-crawler, ai-crawler, unknown-bot (enforced by a
   /// CHECK constraint in Postgres, not a Prisma enum, to match the same
   /// vocabulary the middleware and WP plugin already use in TS/PHP).
@@ -63,11 +124,12 @@ model PricingRule {
 }
 
 model PolicyRule {
-  id                String @id @default(uuid()) @db.Uuid
-  siteId            String @map("site_id") @db.Uuid
+  id                String @id @default(cuid())
+  siteId            String @map("site_id")
   botClassification String @map("bot_classification")
+
   /// One of: allow, charge, block (CHECK-constrained, see PricingRule note).
-  action            String
+  action String
 
   site Site @relation(fields: [siteId], references: [id], onDelete: Cascade)
 
@@ -77,8 +139,8 @@ model PolicyRule {
 
 /// Written by the middleware via the internal API, read by the dashboard.
 model Transaction {
-  id                String   @id @default(uuid()) @db.Uuid
-  siteId            String   @map("site_id") @db.Uuid
+  id                String   @id @default(cuid())
+  siteId            String   @map("site_id")
   url               String
   botClassification String   @map("bot_classification")
   amount            String
