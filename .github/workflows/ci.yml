@@ -7,6 +7,25 @@ on:
 jobs:
   ci:
     runs-on: ubuntu-latest
+    # packages/dashboard's tests run against a real Postgres (see its
+    # README) rather than mocks, consistent with how the rest of this repo
+    # tests against real ephemeral services -- so CI needs one too.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: crawlpay_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/crawlpay_ci
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -31,6 +50,9 @@ jobs:
       # this running first.
       - name: Build
         run: pnpm build
+
+      - name: Migrate dashboard database
+        run: pnpm --filter @crawlpay/dashboard exec prisma migrate deploy
 
       - name: Lint
         run: pnpm lint
