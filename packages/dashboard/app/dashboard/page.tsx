@@ -1,4 +1,5 @@
 import { requirePublisher } from "@/lib/auth";
+import { classificationPillClass } from "@/lib/classification-pill";
 import { prisma } from "@/lib/prisma";
 import { RevenueChart, type RevenueChartPoint } from "@/components/RevenueChart";
 import { createSite } from "./actions";
@@ -44,103 +45,115 @@ export default async function DashboardOverviewPage() {
   const totalRevenue = transactions.reduce((sum, tx) => sum + toUsdc(tx.amount), 0);
 
   return (
-    <div style={{ display: "grid", gap: "2rem", maxWidth: 900 }}>
+    <div className="stack">
       <section>
-        <h1>Overview</h1>
-        <p style={{ color: "#666" }}>
+        <h1 style={{ fontSize: "1.75rem", marginBottom: "0.5rem" }}>Overview</h1>
+        <p className="muted">
           Last 30 days across {sites.length} site{sites.length === 1 ? "" : "s"} —{" "}
-          <strong>${totalRevenue.toFixed(4)}</strong> total revenue.
+          <strong style={{ color: "var(--ink)" }}>${totalRevenue.toFixed(4)}</strong> total revenue.
         </p>
       </section>
 
-      <section>
-        <h2>Revenue</h2>
+      <section className="card">
+        <h2 style={{ fontSize: "1.1rem", marginBottom: "1rem" }}>Revenue</h2>
         {chartData.length > 0 ? (
           <RevenueChart data={chartData} />
         ) : (
-          <p style={{ color: "#666" }}>
-            No transactions yet. Once your middleware is pushing transactions here,
-            revenue shows up on this chart.
+          <p className="empty-state">
+            No transactions yet. Once your middleware is pushing transactions here, revenue shows
+            up on this chart.
           </p>
         )}
       </section>
 
-      <section>
-        <h2>Revenue by traffic type</h2>
+      <section className="card">
+        <h2 style={{ fontSize: "1.1rem", marginBottom: "1rem" }}>Revenue by traffic type</h2>
         {byClassification.size > 0 ? (
-          <table style={{ borderCollapse: "collapse", width: "100%" }}>
-            <tbody>
-              {[...byClassification.entries()]
-                .sort(([, a], [, b]) => b - a)
-                .map(([classification, usdc]) => (
-                  <tr key={classification} style={{ borderBottom: "1px solid #eee" }}>
-                    <td style={{ padding: "0.4rem 0" }}>{classification}</td>
-                    <td style={{ padding: "0.4rem 0", textAlign: "right" }}>
-                      ${usdc.toFixed(4)}
+          <div style={{ display: "grid", gap: "0.6rem" }}>
+            {[...byClassification.entries()]
+              .sort(([, a], [, b]) => b - a)
+              .map(([classification, usdc]) => (
+                <div key={classification} className="field-row">
+                  <span className={`pill ${classificationPillClass(classification)}`}>
+                    {classification}
+                  </span>
+                  <span style={{ fontWeight: 600, fontFamily: "var(--font-display)" }}>
+                    ${usdc.toFixed(4)}
+                  </span>
+                </div>
+              ))}
+          </div>
+        ) : (
+          <p className="empty-state">Nothing to break down yet.</p>
+        )}
+      </section>
+
+      <section className="card">
+        <h2 style={{ fontSize: "1.1rem", marginBottom: "1rem" }}>Recent transactions</h2>
+        {transactions.length > 0 ? (
+          <div style={{ overflowX: "auto" }}>
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>When</th>
+                  <th>Site</th>
+                  <th>URL</th>
+                  <th>Type</th>
+                  <th>Payer</th>
+                  <th style={{ textAlign: "right" }}>Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                {transactions.slice(0, 20).map((tx) => (
+                  <tr key={tx.id}>
+                    <td>{tx.occurredAt.toLocaleString()}</td>
+                    <td>{tx.site.domain}</td>
+                    <td
+                      style={{ maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                    >
+                      {tx.url}
                     </td>
+                    <td>
+                      <span className={`pill ${classificationPillClass(tx.botClassification)}`}>
+                        {tx.botClassification}
+                      </span>
+                    </td>
+                    <td
+                      style={{ maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                    >
+                      {tx.payer}
+                    </td>
+                    <td style={{ textAlign: "right" }}>${toUsdc(tx.amount).toFixed(4)}</td>
                   </tr>
                 ))}
-            </tbody>
-          </table>
+              </tbody>
+            </table>
+          </div>
         ) : (
-          <p style={{ color: "#666" }}>Nothing to break down yet.</p>
+          <p className="empty-state">No transactions recorded yet.</p>
         )}
       </section>
 
-      <section>
-        <h2>Recent transactions</h2>
-        {transactions.length > 0 ? (
-          <table style={{ borderCollapse: "collapse", width: "100%", fontSize: "0.875rem" }}>
-            <thead>
-              <tr style={{ textAlign: "left", borderBottom: "2px solid #ddd" }}>
-                <th style={{ padding: "0.4rem 0" }}>When</th>
-                <th>Site</th>
-                <th>URL</th>
-                <th>Type</th>
-                <th>Payer</th>
-                <th style={{ textAlign: "right" }}>Amount</th>
-              </tr>
-            </thead>
-            <tbody>
-              {transactions.slice(0, 20).map((tx) => (
-                <tr key={tx.id} style={{ borderBottom: "1px solid #eee" }}>
-                  <td style={{ padding: "0.4rem 0" }}>{tx.occurredAt.toLocaleString()}</td>
-                  <td>{tx.site.domain}</td>
-                  <td style={{ maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis" }}>
-                    {tx.url}
-                  </td>
-                  <td>{tx.botClassification}</td>
-                  <td>{tx.payer}</td>
-                  <td style={{ textAlign: "right" }}>${toUsdc(tx.amount).toFixed(4)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        ) : (
-          <p style={{ color: "#666" }}>No transactions recorded yet.</p>
-        )}
-      </section>
-
-      <section>
-        <h2>Your sites</h2>
-        <ul>
-          {sites.map((site) => (
-            <li key={site.id}>
-              {site.domain} —{" "}
-              <a href={`/dashboard/sites/${site.id}/pricing`}>pricing</a> ·{" "}
-              <a href={`/dashboard/sites/${site.id}/setup`}>setup</a>
-            </li>
-          ))}
-        </ul>
-        <form action={createSite} style={{ display: "flex", gap: "0.5rem", maxWidth: 400 }}>
-          <input
-            type="text"
-            name="domain"
-            placeholder="example.com"
-            required
-            style={{ flex: 1, padding: "0.4rem" }}
-          />
-          <button type="submit">Add site</button>
+      <section className="card">
+        <h2 style={{ fontSize: "1.1rem", marginBottom: "1rem" }}>Your sites</h2>
+        {sites.length > 0 ? (
+          <ul style={{ display: "grid", gap: "0.5rem", marginBottom: "1.25rem" }}>
+            {sites.map((site) => (
+              <li key={site.id} className="field-row" style={{ padding: "0.5rem 0" }}>
+                <span style={{ fontWeight: 500 }}>{site.domain}</span>
+                <span style={{ display: "flex", gap: "1rem", fontSize: "0.8125rem" }}>
+                  <a href={`/dashboard/sites/${site.id}/pricing`}>pricing</a>
+                  <a href={`/dashboard/sites/${site.id}/setup`}>setup</a>
+                </span>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        <form action={createSite} className="form-inline" style={{ maxWidth: 420 }}>
+          <input type="text" name="domain" placeholder="example.com" required style={{ flex: 1 }} />
+          <button type="submit" className="btn btn-primary">
+            Add site
+          </button>
         </form>
       </section>
     </div>

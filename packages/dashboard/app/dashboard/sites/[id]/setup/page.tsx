@@ -15,52 +15,39 @@ export default async function SiteSetupPage({ params }: { params: { id: string }
   const dashboardUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "https://your-dashboard.example.com";
 
   return (
-    <div style={{ display: "grid", gap: "2rem", maxWidth: 700 }}>
+    <div className="stack" style={{ maxWidth: 700 }}>
       <div>
-        <h1>{site.domain}</h1>
-        <p style={{ color: "#666" }}>Setup</p>
+        <h1 style={{ fontSize: "1.75rem", marginBottom: "0.25rem" }}>{site.domain}</h1>
+        <p className="muted">Setup</p>
       </div>
 
-      <section>
-        <h2>Deploy key</h2>
-        <p style={{ color: "#666" }}>
+      <section className="card">
+        <h2 style={{ fontSize: "1.1rem", marginBottom: "0.5rem" }}>Deploy key</h2>
+        <p className="muted" style={{ marginBottom: "0.75rem" }}>
           Bearer secret for this site — keep it out of source control. The middleware server
           uses it to pull pricing/policy from this dashboard and push transaction records here
           instead of only using its local config file.
         </p>
-        <code
-          style={{
-            display: "block",
-            padding: "0.75rem",
-            background: "#f5f5f5",
-            wordBreak: "break-all",
-          }}
-        >
-          {site.middlewareDeployKey}
-        </code>
+        <code className="code-block">{site.middlewareDeployKey}</code>
       </section>
 
-      <section>
-        <h2>Configure the middleware</h2>
-        <p>Set these on wherever the CrawlPay middleware is deployed (e.g. Render):</p>
-        <pre
-          style={{
-            background: "#f5f5f5",
-            padding: "0.75rem",
-            overflowX: "auto",
-          }}
-        >{`CRAWLPAY_DASHBOARD_URL=${dashboardUrl}
+      <section className="card">
+        <h2 style={{ fontSize: "1.1rem", marginBottom: "0.5rem" }}>Configure the middleware</h2>
+        <p style={{ marginBottom: "0.75rem" }}>
+          Set these on wherever the CrawlPay middleware is deployed (e.g. Render):
+        </p>
+        <pre className="code-block" style={{ marginBottom: "0.75rem" }}>{`CRAWLPAY_DASHBOARD_URL=${dashboardUrl}
 CRAWLPAY_DASHBOARD_DEPLOY_KEY=${site.middlewareDeployKey}`}</pre>
-        <p style={{ color: "#666" }}>
+        <p className="muted">
           The middleware polls <code>GET /api/v1/config</code> here for pricing/policy and calls{" "}
           <code>POST /api/v1/transactions</code> after each verified payment, falling back to its
           local <code>publisher-config.json</code> if this dashboard is unreachable.
         </p>
       </section>
 
-      <section>
-        <h2>WordPress plugin</h2>
-        <p>
+      <section className="card">
+        <h2 style={{ fontSize: "1.1rem", marginBottom: "0.75rem" }}>WordPress plugin</h2>
+        <p style={{ marginBottom: "0.75rem" }}>
           <strong>Mode A (reverse proxy, recommended):</strong> point your DNS/server config at
           the middleware in front of this site. The middleware handles every request; this
           dashboard is where you manage pricing and policy.
