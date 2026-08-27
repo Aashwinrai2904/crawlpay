@@ -43,7 +43,12 @@ export const authOptions: NextAuthOptions = {
     }),
   ],
   pages: {
+    // Also covers `error` -- NextAuth's own built-in error page 500s under
+    // the App Router (it assumes a Pages Router setup to render into), so
+    // redirect errors to /login instead, which already reads and displays
+    // the `error` query param NextAuth appends.
     signIn: "/login",
+    error: "/login",
     verifyRequest: "/login/check-email",
   },
   callbacks: {
