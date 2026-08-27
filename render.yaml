@@ -46,3 +46,59 @@ services:
       # Update this if the WordPress site's URL ever changes.
       - key: CRAWLPAY_WORDPRESS_URL
         value: https://cpayplugin.s6-tastewp.com
+
+  # A trivial standalone origin (see infra/mock-origin) so the
+  # dashboard-managed middleware below has something real to reverse-proxy
+  # to on the public internet, without pointing at anyone's actual site.
+  - type: web
+    name: crawlpay-mock-origin
+    runtime: node
+    plan: free
+    region: oregon
+    buildCommand: npm install -g pnpm@11.21.0 && pnpm install --frozen-lockfile && pnpm --filter mock-origin build
+    startCommand: pnpm --filter mock-origin start
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+
+  # A second middleware instance, config-sourced from the Phase 6 publisher
+  # dashboard instead of a WordPress site (see
+  # DashboardPublisherConfigSource) -- this is how a dashboard-managed site
+  # (e.g. crystaara.shop) gets a real, publicly reachable middleware to
+  # test against without touching that site's actual DNS. Kept as a
+  # separate service from crawlpay-middleware above rather than repointing
+  # it, so the existing WordPress test path keeps working untouched.
+  - type: web
+    name: crawlpay-middleware-dashboard
+    runtime: node
+    plan: free
+    region: oregon
+    healthCheckPath: /health
+    buildCommand: npm install -g pnpm@11.21.0 && pnpm install --frozen-lockfile && pnpm --filter @crawlpay/middleware... build
+    startCommand: pnpm --filter @crawlpay/middleware start
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: CRAWLPAY_FACILITATOR_URL
+        value: https://crawlpay-mock-facilitator.onrender.com
+      - key: ORIGIN_URL
+        value: https://crawlpay-mock-origin.onrender.com
+      # Auto-generated on first deploy. Used by /stats and /verify-and-price
+      # auth; no external caller needs it yet for a dashboard-managed site,
+      # but the code expects the same env var name regardless of config
+      # source, so keep it generated for consistency.
+      - key: CRAWLPAY_SITE_KEY
+        generateValue: true
+      # The Phase 6 publisher dashboard this service pulls policy/pricing
+      # from and reports transactions to (GET/POST /api/v1/*). Fixed for
+      # this project -- only the deploy key below changes per site.
+      - key: CRAWLPAY_DASHBOARD_URL
+        value: https://crawlpay-dashboard-couride.vercel.app
+      # Per-site secret from that site's Setup page on the dashboard
+      # (Dashboard > Your sites > <site> > setup > "Deploy key"). Never
+      # hardcode a real secret here -- this file is committed to a PUBLIC
+      # GitHub repo. sync: false means Render leaves this blank on
+      # first deploy; paste the deploy key into the service's Environment
+      # tab in the Render dashboard after creating it.
+      - key: CRAWLPAY_DASHBOARD_DEPLOY_KEY
+        sync: false
