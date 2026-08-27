@@ -5,6 +5,7 @@ dist/
 .turbo/
 coverage/
 *.log
+.phpunit.result.cache
 .env
 .env.local
 .DS_Store

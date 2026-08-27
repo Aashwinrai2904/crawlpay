@@ -15,15 +15,30 @@ WordPress's activation-time `plugin_sandbox_scrape()` re-include tripped
 over as a fatal `TypeError`. Fixed by deferring that call to `plugins_loaded`
 (see crawlpay.php).
 
-Still unverified: the sandbox this plugin was originally built in has no
-PHP, Composer, or WP-CLI, so the PHPUnit suite itself has never actually
-been run (written carefully against wp-phpunit conventions, but unexecuted)
-— run `composer install && composer exec phpunit` before trusting it. Mode
-B's actual `/verify-and-price` behavior against a live middleware is also
-still untested end-to-end (the settings/activation checks above were done
-with Middleware URL left blank, which makes Mode B's guard a no-op by
-design). Run `phpcs` (WordPress-Coding-Standards) too if you want static
-analysis on top of the above.
+**PHPUnit suite run for the first time, all green** (2026-08-27): 17
+tests, 31 assertions, against a real MariaDB-backed WP 6.9.7 test
+environment (`wp-phpunit/wp-phpunit`, matched to the version composer
+actually resolves). `tests/test-rest-config-controller.php` and
+`tests/test-mode-b-guard.php` both pass unmodified — see "Running the
+tests" below for the exact setup, since it's a few non-obvious steps
+(`WP_PHPUNIT__TESTS_CONFIG`, a matching WP core checkout).
+
+**Mode B's `/verify-and-price` call verified end-to-end against a live
+middleware** (2026-08-27), closing the other gap this section used to
+flag: a real WordPress 6.9.7 site (MariaDB-backed, plugin activated via
+`activate_plugin()`, Mode B configured with a middleware URL and site
+key) was hit with a GPTBot User-Agent through the actual `template_redirect`
+guard, against an actually-running middleware + mock facilitator — not a
+stub. Unpaid request: real `402` with a live-generated x402 challenge from
+the middleware. Same request retried with a payment proof built from that
+challenge's nonce: WordPress served the real page (`200`), and the
+middleware's transaction log recorded the payment. Confirms the plugin's
+`wp_remote_post()` call, the middleware's site-key auth, and the
+quote/proof split in `class-mode-b-guard.php` all work together as
+designed, not just in isolation.
+
+Run `phpcs` (WordPress-Coding-Standards) if you want static analysis on
+top of the above — not yet run.
 
 ## What this plugin is
 
@@ -113,14 +128,48 @@ of `wp-content/plugins/` creates `wp-content/plugins/crawlpay/...`.
 
 ## Running the tests
 
-Requires a local WordPress PHPUnit test environment (MySQL test database +
-`WP_TESTS_DIR`) — see the [WordPress core testing
+Requires a real MySQL/MariaDB test database and a WordPress core checkout
+matching whatever version `composer install` resolves `wp-phpunit/wp-phpunit`
+to (check `composer.lock` — it won't necessarily match this plugin's
+`Requires at least` header). The [WordPress core testing
 handbook](https://make.wordpress.org/core/handbook/testing/automated-testing/phpunit/)
-for setup. Once that's in place:
+covers the general approach; concretely, what actually worked:
 
 ```bash
-composer install
-composer exec phpunit
+composer install   # pulls in wp-phpunit/wp-phpunit as a dev dependency
+
+# WP core itself isn't part of that package -- fetch a matching version.
+# Check composer.lock's wp-phpunit/wp-phpunit "version" first and use the
+# same X.Y-branch here.
+git clone --depth 1 --branch 6.9-branch \
+  https://github.com/WordPress/WordPress.git /tmp/wp-core-test
+
+# A MySQL/MariaDB user + database PHPUnit can freely create/drop tables in:
+mysql -u root -e "
+  CREATE DATABASE wordpress_test;
+  CREATE USER 'wp_test'@'localhost' IDENTIFIED BY 'wp_test_pw';
+  GRANT ALL PRIVILEGES ON wordpress_test.* TO 'wp_test'@'localhost';
+"
+
+cat > /tmp/wp-tests-config.php <<'EOF'
+<?php
+define( 'DB_NAME', 'wordpress_test' );
+define( 'DB_USER', 'wp_test' );
+define( 'DB_PASSWORD', 'wp_test_pw' );
+define( 'DB_HOST', 'localhost' );
+define( 'DB_CHARSET', 'utf8' );
+define( 'DB_COLLATE', '' );
+$table_prefix = 'wptests_';
+define( 'WP_TESTS_DOMAIN', 'example.org' );
+define( 'WP_TESTS_EMAIL', 'admin@example.org' );
+define( 'WP_TESTS_TITLE', 'CrawlPay Test Suite' );
+define( 'WP_PHP_BINARY', 'php' );
+define( 'ABSPATH', '/tmp/wp-core-test/' );
+EOF
+
+export WP_PHPUNIT__TESTS_CONFIG=/tmp/wp-tests-config.php
+php vendor/wp-phpunit/wp-phpunit/includes/install.php /tmp/wp-tests-config.php
+vendor/bin/phpunit
 ```
 
 `tests/test-rest-config-controller.php` covers the REST config endpoint
