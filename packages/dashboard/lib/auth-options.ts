@@ -3,6 +3,11 @@ import type { NextAuthOptions } from "next-auth";
 import EmailProvider from "next-auth/providers/email";
 import { prisma } from "./prisma";
 
+/** crawlpay.pro is verified with Resend, so magic links can go to any
+ * publisher's inbox rather than just the Resend account owner's own
+ * (Resend's shared testing address only delivers to that one address). */
+const EMAIL_FROM = "CrawlPay <onboarding@crawlpay.pro>";
+
 /**
  * The Email (magic-link) provider requires an adapter to persist users and
  * verification tokens, but the session itself is a JWT (not a database
@@ -14,7 +19,7 @@ export const authOptions: NextAuthOptions = {
   session: { strategy: "jwt" },
   providers: [
     EmailProvider({
-      from: process.env.EMAIL_FROM ?? "CrawlPay <onboarding@resend.dev>",
+      from: EMAIL_FROM,
       sendVerificationRequest: async ({ identifier, url }) => {
         const apiKey = process.env.RESEND_API_KEY;
         if (!apiKey) {
@@ -28,7 +33,7 @@ export const authOptions: NextAuthOptions = {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            from: process.env.EMAIL_FROM ?? "CrawlPay <onboarding@resend.dev>",
+            from: EMAIL_FROM,
             to: identifier,
             subject: "Sign in to CrawlPay",
             html: `<p>Click below to sign in to CrawlPay.</p><p><a href="${url}">Sign in</a></p><p>If you didn't request this, you can ignore this email.</p>`,
