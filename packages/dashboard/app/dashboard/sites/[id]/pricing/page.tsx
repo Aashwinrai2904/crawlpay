@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { requirePublisher } from "@/lib/auth";
+import { classificationPillClass } from "@/lib/classification-pill";
 import { prisma } from "@/lib/prisma";
 import { deletePricingRule, updatePolicy, upsertPricingRule } from "../actions";
 
@@ -22,25 +23,22 @@ export default async function SitePricingPage({ params }: { params: { id: string
   const boundUpsertPricingRule = upsertPricingRule.bind(null, site.id);
 
   return (
-    <div style={{ display: "grid", gap: "2rem", maxWidth: 800 }}>
+    <div className="stack" style={{ maxWidth: 800 }}>
       <div>
-        <h1>{site.domain}</h1>
-        <p style={{ color: "#666" }}>Pricing &amp; policy</p>
+        <h1 style={{ fontSize: "1.75rem", marginBottom: "0.25rem" }}>{site.domain}</h1>
+        <p className="muted">Pricing &amp; policy</p>
       </div>
 
-      <section>
-        <h2>Policy</h2>
-        <p style={{ color: "#666" }}>
+      <section className="card">
+        <h2 style={{ fontSize: "1.1rem", marginBottom: "0.5rem" }}>Policy</h2>
+        <p className="muted" style={{ marginBottom: "1.25rem" }}>
           What happens to each kind of visitor. Only ai-crawler pricing rules below actually
           matter unless its policy is &quot;charge&quot;.
         </p>
-        <form action={boundUpdatePolicy} style={{ display: "grid", gap: "0.5rem", maxWidth: 400 }}>
+        <form action={boundUpdatePolicy} className="stack" style={{ gap: "0.75rem", maxWidth: 420 }}>
           {CLASSIFICATIONS.map((classification) => (
-            <label
-              key={classification}
-              style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}
-            >
-              {classification}
+            <div key={classification} className="field-row">
+              <span className={`pill ${classificationPillClass(classification)}`}>{classification}</span>
               <select
                 name={`policy-${classification}`}
                 defaultValue={policyByClassification.get(classification)?.action ?? "allow"}
@@ -51,52 +49,59 @@ export default async function SitePricingPage({ params }: { params: { id: string
                   </option>
                 ))}
               </select>
-            </label>
+            </div>
           ))}
-          <button type="submit" style={{ marginTop: "0.5rem" }}>
+          <button type="submit" className="btn btn-primary" style={{ marginTop: "0.5rem", alignSelf: "start" }}>
             Save policy
           </button>
         </form>
       </section>
 
-      <section>
-        <h2>Pricing rules</h2>
+      <section className="card">
+        <h2 style={{ fontSize: "1.1rem", marginBottom: "1rem" }}>Pricing rules</h2>
         {site.pricingRules.length > 0 ? (
-          <table style={{ borderCollapse: "collapse", width: "100%", marginBottom: "1rem" }}>
-            <thead>
-              <tr style={{ textAlign: "left", borderBottom: "2px solid #ddd" }}>
-                <th style={{ padding: "0.4rem 0" }}>Path</th>
-                <th>Type</th>
-                <th>Price</th>
-                <th>Currency</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {site.pricingRules.map((rule) => (
-                <tr key={rule.id} style={{ borderBottom: "1px solid #eee" }}>
-                  <td style={{ padding: "0.4rem 0" }}>{rule.pathPattern}</td>
-                  <td>{rule.botClassification}</td>
-                  <td>{(rule.priceCents / 100).toFixed(2)}¢</td>
-                  <td>{rule.currency}</td>
-                  <td>
-                    <form action={deletePricingRule.bind(null, site.id, rule.id)}>
-                      <button type="submit">Delete</button>
-                    </form>
-                  </td>
+          <div style={{ overflowX: "auto", marginBottom: "1.5rem" }}>
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Path</th>
+                  <th>Type</th>
+                  <th>Price</th>
+                  <th>Currency</th>
+                  <th />
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {site.pricingRules.map((rule) => (
+                  <tr key={rule.id}>
+                    <td>{rule.pathPattern}</td>
+                    <td>
+                      <span className={`pill ${classificationPillClass(rule.botClassification)}`}>
+                        {rule.botClassification}
+                      </span>
+                    </td>
+                    <td>{(rule.priceCents / 100).toFixed(2)}¢</td>
+                    <td>{rule.currency}</td>
+                    <td style={{ textAlign: "right" }}>
+                      <form action={deletePricingRule.bind(null, site.id, rule.id)}>
+                        <button type="submit" className="btn btn-danger-ghost">
+                          Delete
+                        </button>
+                      </form>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         ) : (
-          <p style={{ color: "#666" }}>No pricing rules yet — requests fall back to the middleware&apos;s own default.</p>
+          <p className="empty-state">
+            No pricing rules yet — requests fall back to the middleware&apos;s own default.
+          </p>
         )}
 
-        <h3>Add a rule</h3>
-        <form
-          action={boundUpsertPricingRule}
-          style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", alignItems: "center" }}
-        >
+        <h3 style={{ fontSize: "0.95rem", marginBottom: "0.75rem" }}>Add a rule</h3>
+        <form action={boundUpsertPricingRule} className="form-inline">
           <select name="botClassification" defaultValue="ai-crawler">
             {CLASSIFICATIONS.map((classification) => (
               <option key={classification} value={classification}>
@@ -115,7 +120,9 @@ export default async function SitePricingPage({ params }: { params: { id: string
             style={{ width: 120 }}
           />
           <input type="text" name="currency" defaultValue="USDC" style={{ width: 80 }} />
-          <button type="submit">Add</button>
+          <button type="submit" className="btn btn-primary">
+            Add
+          </button>
         </form>
       </section>
     </div>

@@ -38,22 +38,34 @@ export function LoginForm() {
   }
 
   return (
-    <main style={{ maxWidth: 360, margin: "4rem auto", fontFamily: "system-ui, sans-serif" }}>
-      <h1>CrawlPay</h1>
-      <p>Sign in with a magic link — no password needed.</p>
-      <form onSubmit={handleSubmit}>
-        <input
-          type="email"
-          name="email"
-          placeholder="you@example.com"
-          required
-          style={{ width: "100%", padding: "0.5rem", marginBottom: "0.75rem" }}
-        />
-        <button type="submit" disabled={submitting} style={{ width: "100%", padding: "0.5rem" }}>
-          {submitting ? "Sending…" : "Send magic link"}
-        </button>
-      </form>
-      {error ? <p style={{ color: "crimson", marginTop: "1rem" }}>{error}</p> : null}
+    <main
+      style={{
+        minHeight: "100vh",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "1.5rem",
+      }}
+    >
+      <div className="card" style={{ maxWidth: 380, width: "100%" }}>
+        <span className="badge" style={{ marginBottom: "1.25rem" }}>
+          <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--blue)" }} />
+          Publisher sign-in
+        </span>
+        <h1 style={{ fontSize: "1.5rem", marginBottom: "0.5rem" }}>CrawlPay</h1>
+        <p className="muted" style={{ marginBottom: "1.5rem" }}>
+          Sign in with a magic link — no password needed.
+        </p>
+        <form onSubmit={handleSubmit} className="stack" style={{ gap: "0.75rem" }}>
+          <input type="email" name="email" placeholder="you@example.com" required />
+          <button type="submit" className="btn btn-primary btn-block" disabled={submitting}>
+            {submitting ? "Sending…" : "Send magic link"}
+          </button>
+        </form>
+        {error ? (
+          <p style={{ color: "var(--pink)", fontSize: "0.875rem", marginTop: "1rem" }}>{error}</p>
+        ) : null}
+      </div>
     </main>
   );
 }
