@@ -91,9 +91,13 @@ root's `pnpm -r build` that would otherwise build `core` first.
 Required env vars on Vercel: `DATABASE_URL` (a pooled connection string if
 your provider offers one — direct connections exhaust fast on serverless),
 `NEXTAUTH_URL` (the deployed URL), `NEXTAUTH_SECRET`, `RESEND_API_KEY`,
-`EMAIL_FROM`, `NEXT_PUBLIC_SITE_URL`. Run `prisma migrate deploy` against
-the production `DATABASE_URL` before or as part of first deploy — nothing
-runs migrations automatically.
+`NEXT_PUBLIC_SITE_URL`. Run `prisma migrate deploy` against the production
+`DATABASE_URL` before or as part of first deploy — nothing runs migrations
+automatically.
+
+If an `EMAIL_FROM` var is left over from before magic-link sending was
+tied to a verified domain, delete it — the sending address is now
+hardcoded in `lib/auth-options.ts` and no env var can override it.
 
 ## Tests
 
