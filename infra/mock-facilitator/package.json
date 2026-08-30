@@ -1,7 +1,8 @@
 {
   "name": "mock-facilitator",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "main": "dist/app.js",
   "types": "dist/app.d.ts",
   "scripts": {

@@ -18,9 +18,10 @@ if ( ! defined( 'ABSPATH' ) ) {
  * request handling. Response shape matches the middleware's own
  * PublisherConfig (policy + pricing), plus an "overrides" array.
  *
- * Note: as of this version the middleware itself still reads
- * publisher-config.json locally and does not yet poll this endpoint —
- * that wiring is future work on the middleware side.
+ * The middleware polls this endpoint directly for WordPress-managed sites
+ * (see WordPressPublisherConfigSource on the middleware side) when
+ * CRAWLPAY_WORDPRESS_URL is set, falling back to its local
+ * publisher-config.json only if this site is unreachable.
  */
 class Rest_Config_Controller {
 
@@ -49,10 +50,13 @@ class Rest_Config_Controller {
 	public function check_permission( $request ) {
 		$configured_key = Settings::get_raw_settings()['site_key'];
 		if ( '' === $configured_key ) {
-			// No key configured: open. Fine for local development; the
-			// settings page and README both call out that production
-			// deployments should set one.
-			return true;
+			// No key configured means no way to tell a legitimate caller
+			// (the middleware) from anyone else -- refuse rather than
+			// serve pricing/policy/payout-address config to the internet.
+			// (Previously returned true here; see
+			// SECURITY-REVIEW-NOTES.md item 8. Set Settings > CrawlPay >
+			// Site key to use Mode A / the REST config endpoint at all.)
+			return false;
 		}
 		$provided = $request->get_header( 'x_crawlpay_site_key' );
 		return is_string( $provided ) && hash_equals( $configured_key, $provided );

@@ -94,17 +94,35 @@ code:
 
 - Node.js >= 22 (pnpm 11 requires it)
 - pnpm (`corepack enable` or `npm install -g pnpm`)
-- Docker + Docker Compose (for local infra)
+- A Postgres and a Redis instance reachable locally — via `infra/docker-compose.yml`, or your own
+  local installs (see the fallback below if Docker isn't available in your environment)
 
 ## Running locally
 
-Start Redis, Postgres, and the two mock services:
+Start Redis and Postgres (`docker compose` also defines `mock-origin`/`mock-facilitator`
+services, but don't run those — `pnpm dev` below starts its own copies of both, and running both
+at once fights over the same ports):
 
 ```bash
-docker compose -f infra/docker-compose.yml up
+docker compose -f infra/docker-compose.yml up redis postgres
 ```
 
-In another terminal, install dependencies and start the app packages (middleware + dashboard):
+**No working Docker?** Run Postgres and Redis directly instead — matching the credentials
+`docker-compose.yml` uses, so `DATABASE_URL=postgresql://crawlpay:crawlpay@localhost:5432/crawlpay`
+works either way:
+
+```bash
+# Postgres: create a role/db named "crawlpay" (password "crawlpay") on a locally running server
+createuser crawlpay --pwprompt   # enter "crawlpay" when prompted
+createdb crawlpay --owner=crawlpay
+
+# Redis: any local install, default port
+redis-server
+```
+
+In another terminal, install dependencies and start every app package — middleware, dashboard,
+and both mock services (`pnpm --parallel -r run dev` runs every workspace package's own `dev`
+script, not just middleware + dashboard):
 
 ```bash
 pnpm install
@@ -115,6 +133,11 @@ pnpm dev
 - Dashboard: http://localhost:3000
 - Mock origin: http://localhost:4000
 - Mock facilitator: http://localhost:4100
+
+To confirm the core x402 flow actually works end to end once the middleware is up: a normal
+browser User-Agent against `http://localhost:8787/about.html` gets `200`; `GPTBot`'s User-Agent
+against `http://localhost:8787/premium-article.html` gets `402` with a price quote; retrying that
+same request with a valid `X-Payment` header (built from the `402` response's `nonce`) gets `200`.
 
 ## Scripts
 

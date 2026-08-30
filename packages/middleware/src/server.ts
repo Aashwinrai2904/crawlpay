@@ -149,8 +149,13 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
   });
 
   function isAuthorized(headers: Record<string, string>): boolean {
+    // No configured key means no way to tell a legitimate caller from
+    // anyone else -- refuse the request rather than silently opening
+    // /stats and /verify-and-price to the internet. (Previously returned
+    // true here, i.e. open-by-default with no key set; see
+    // SECURITY-REVIEW-NOTES.md item 8.)
     if (!siteKey) {
-      return true;
+      return false;
     }
     const provided = headers[SITE_KEY_HEADER];
     if (typeof provided !== "string") {
