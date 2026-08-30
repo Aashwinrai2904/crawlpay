@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { requirePublisher } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { regenerateDeployKey } from "@/app/dashboard/actions";
 
 export default async function SiteSetupPage({ params }: { params: { id: string } }) {
   const { publisher } = await requirePublisher();
@@ -29,6 +30,18 @@ export default async function SiteSetupPage({ params }: { params: { id: string }
           instead of only using its local config file.
         </p>
         <code className="code-block">{site.middlewareDeployKey}</code>
+        <form action={regenerateDeployKey} style={{ marginTop: "0.75rem" }}>
+          <input type="hidden" name="siteId" value={site.id} />
+          <button type="submit" className="btn btn-outline">
+            Regenerate deploy key
+          </button>
+          <p className="muted" style={{ marginTop: "0.5rem", fontSize: "0.875rem" }}>
+            If this key has been shared anywhere it shouldn&apos;t have (a chat log, a public
+            repo, a screenshot), regenerate it. The old key stops working immediately — update
+            <code>CRAWLPAY_DASHBOARD_DEPLOY_KEY</code> wherever the middleware is deployed right
+            after, or it starts failing to reach this dashboard.
+          </p>
+        </form>
       </section>
 
       <section className="card">

@@ -49,3 +49,29 @@ export async function createSite(formData: FormData): Promise<void> {
 
   revalidatePath("/dashboard");
 }
+
+/**
+ * Issues a fresh deploy key for a site, invalidating the old one immediately
+ * (any middleware still configured with it starts failing auth on its next
+ * poll/transaction push). For rotating a key that's leaked or just as
+ * routine hygiene -- there's no "previous key" to fall back to by design,
+ * so the middleware's env var needs updating right after this runs.
+ */
+export async function regenerateDeployKey(formData: FormData): Promise<void> {
+  const siteId = String(formData.get("siteId") ?? "");
+  if (!siteId) {
+    return;
+  }
+
+  const { publisher } = await requirePublisher();
+
+  // updateMany (not update) so this silently no-ops instead of throwing if
+  // siteId doesn't belong to this publisher -- scoping the WHERE clause is
+  // what actually prevents rotating someone else's site's key.
+  await prisma.site.updateMany({
+    where: { id: siteId, publisherId: publisher.id },
+    data: { middlewareDeployKey: randomBytes(32).toString("hex") },
+  });
+
+  revalidatePath(`/dashboard/sites/${siteId}/setup`);
+}
