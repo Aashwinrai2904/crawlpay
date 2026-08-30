@@ -9,6 +9,7 @@
   "packageManager": "pnpm@11.21.0",
   "scripts": {
     "build": "pnpm -r --if-present run build",
+    "predev": "pnpm --filter @crawlpay/core build",
     "dev": "pnpm --parallel -r --if-present run dev",
     "lint": "pnpm -r --if-present run lint",
     "typecheck": "pnpm -r --if-present run typecheck",
