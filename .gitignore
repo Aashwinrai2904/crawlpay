@@ -8,5 +8,6 @@ coverage/
 .phpunit.result.cache
 .env
 .env.local
+.env.*.local
 .DS_Store
 tsconfig.tsbuildinfo
