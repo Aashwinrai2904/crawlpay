@@ -273,8 +273,11 @@ describe("health and metrics", () => {
 });
 
 describe("GET /stats", () => {
+  const SITE_KEY = "top-secret";
+  const SITE_KEY_HEADERS = { "x-crawlpay-site-key": SITE_KEY };
+
   it("reports cache and revenue counters as JSON", async () => {
-    const app = buildTestServer();
+    const app = buildTestServer({ siteKey: SITE_KEY });
 
     const proof: PaymentProof = {
       x402Version: 1,
@@ -289,7 +292,7 @@ describe("GET /stats", () => {
       headers: { "user-agent": GPTBOT_UA, "x-payment": encodePaymentHeader(proof) },
     });
 
-    const response = await app.inject({ method: "GET", url: "/stats" });
+    const response = await app.inject({ method: "GET", url: "/stats", headers: SITE_KEY_HEADERS });
 
     expect(response.statusCode).toBe(200);
     const body = response.json();
@@ -303,28 +306,43 @@ describe("GET /stats", () => {
     );
   });
 
-  it("requires the site key when one is configured", async () => {
-    const app = buildTestServer({ siteKey: "top-secret" });
+  it("requires the site key when one is configured: no key, wrong key, right key", async () => {
+    const app = buildTestServer({ siteKey: SITE_KEY });
 
-    const unauthorized = await app.inject({ method: "GET", url: "/stats" });
-    expect(unauthorized.statusCode).toBe(401);
+    const noKey = await app.inject({ method: "GET", url: "/stats" });
+    expect(noKey.statusCode).toBe(401);
 
-    const authorized = await app.inject({
+    const wrongKey = await app.inject({
       method: "GET",
       url: "/stats",
-      headers: { "x-crawlpay-site-key": "top-secret" },
+      headers: { "x-crawlpay-site-key": "a-different-sites-key" },
     });
-    expect(authorized.statusCode).toBe(200);
+    expect(wrongKey.statusCode).toBe(401);
+
+    const rightKey = await app.inject({ method: "GET", url: "/stats", headers: SITE_KEY_HEADERS });
+    expect(rightKey.statusCode).toBe(200);
+  });
+
+  it("refuses every request when no site key is configured at all (fails closed, not open)", async () => {
+    const app = buildTestServer({ siteKey: undefined });
+
+    const response = await app.inject({ method: "GET", url: "/stats" });
+
+    expect(response.statusCode).toBe(401);
   });
 });
 
 describe("POST /verify-and-price (Mode B synchronous check)", () => {
+  const SITE_KEY = "top-secret";
+  const SITE_KEY_HEADERS = { "x-crawlpay-site-key": SITE_KEY };
+
   it("returns a charge decision with a payment manifest when no proof is given", async () => {
-    const app = buildTestServer();
+    const app = buildTestServer({ siteKey: SITE_KEY });
 
     const response = await app.inject({
       method: "POST",
       url: "/verify-and-price",
+      headers: SITE_KEY_HEADERS,
       payload: { url: "http://example.test/premium-article.html" },
     });
 
@@ -341,7 +359,7 @@ describe("POST /verify-and-price (Mode B synchronous check)", () => {
         recorded.push(transaction);
       },
     };
-    const app = buildTestServer({ transactionLog });
+    const app = buildTestServer({ siteKey: SITE_KEY, transactionLog });
 
     const proof: PaymentProof = {
       x402Version: 1,
@@ -354,6 +372,7 @@ describe("POST /verify-and-price (Mode B synchronous check)", () => {
     const response = await app.inject({
       method: "POST",
       url: "/verify-and-price",
+      headers: SITE_KEY_HEADERS,
       payload: {
         url: "http://example.test/premium-article.html",
         paymentProofHeader: encodePaymentHeader(proof),
@@ -367,34 +386,52 @@ describe("POST /verify-and-price (Mode B synchronous check)", () => {
   });
 
   it("rejects malformed request bodies", async () => {
-    const app = buildTestServer();
+    const app = buildTestServer({ siteKey: SITE_KEY });
 
     const response = await app.inject({
       method: "POST",
       url: "/verify-and-price",
+      headers: SITE_KEY_HEADERS,
       payload: { notAUrl: true },
     });
 
     expect(response.statusCode).toBe(400);
   });
 
-  it("requires the site key when one is configured", async () => {
-    const app = buildTestServer({ siteKey: "top-secret" });
+  it("requires the site key when one is configured: no key, wrong key, right key", async () => {
+    const app = buildTestServer({ siteKey: SITE_KEY });
+    const payload = { url: "http://example.test/premium-article.html" };
 
-    const unauthorized = await app.inject({
+    const noKey = await app.inject({ method: "POST", url: "/verify-and-price", payload });
+    expect(noKey.statusCode).toBe(401);
+
+    const wrongKey = await app.inject({
+      method: "POST",
+      url: "/verify-and-price",
+      headers: { "x-crawlpay-site-key": "a-different-sites-key" },
+      payload,
+    });
+    expect(wrongKey.statusCode).toBe(401);
+
+    const rightKey = await app.inject({
+      method: "POST",
+      url: "/verify-and-price",
+      headers: SITE_KEY_HEADERS,
+      payload,
+    });
+    expect(rightKey.statusCode).toBe(200);
+  });
+
+  it("refuses every request when no site key is configured at all (fails closed, not open)", async () => {
+    const app = buildTestServer({ siteKey: undefined });
+
+    const response = await app.inject({
       method: "POST",
       url: "/verify-and-price",
       payload: { url: "http://example.test/premium-article.html" },
     });
-    expect(unauthorized.statusCode).toBe(401);
 
-    const authorized = await app.inject({
-      method: "POST",
-      url: "/verify-and-price",
-      headers: { "x-crawlpay-site-key": "top-secret" },
-      payload: { url: "http://example.test/premium-article.html" },
-    });
-    expect(authorized.statusCode).toBe(200);
+    expect(response.statusCode).toBe(401);
   });
 });
 

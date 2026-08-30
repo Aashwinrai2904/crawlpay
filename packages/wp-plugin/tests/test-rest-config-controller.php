@@ -10,10 +10,25 @@
  */
 class Test_Rest_Config_Controller extends WP_UnitTestCase {
 
+	const TEST_SITE_KEY = 'top-secret';
+
 	/**
 	 * @var WP_REST_Server
 	 */
 	protected $server;
+
+	/**
+	 * A GET /crawlpay/v1/config request carrying the configured site key --
+	 * most tests here are about response shape, not the auth gate itself,
+	 * so they need to get past it the same way every time.
+	 *
+	 * @return WP_REST_Request
+	 */
+	private function authorized_request() {
+		$request = new WP_REST_Request( 'GET', '/crawlpay/v1/config' );
+		$request->set_header( 'X-Crawlpay-Site-Key', self::TEST_SITE_KEY );
+		return $request;
+	}
 
 	public function set_up() {
 		parent::set_up();
@@ -43,11 +58,12 @@ class Test_Rest_Config_Controller extends WP_UnitTestCase {
 				array(
 					'pay_to'     => '0xTESTPAYEE0000000000000000000000000000000',
 					'max_amount' => '25000',
+					'site_key'   => self::TEST_SITE_KEY,
 				)
 			)
 		);
 
-		$response = $this->server->dispatch( new WP_REST_Request( 'GET', '/crawlpay/v1/config' ) );
+		$response = $this->server->dispatch( $this->authorized_request() );
 
 		$this->assertSame( 200, $response->get_status() );
 		$data = $response->get_data();
@@ -57,12 +73,15 @@ class Test_Rest_Config_Controller extends WP_UnitTestCase {
 		$this->assertIsArray( $data['overrides'] );
 	}
 
-	public function test_open_when_no_site_key_configured() {
+	public function test_refuses_when_no_site_key_configured_at_all() {
+		// Fails closed, not open -- no key configured means no way to tell
+		// a legitimate caller (the middleware) from anyone else. See
+		// SECURITY-REVIEW-NOTES.md item 8.
 		update_option( 'crawlpay_settings', \CrawlPay\Settings::default_settings() );
 
 		$response = $this->server->dispatch( new WP_REST_Request( 'GET', '/crawlpay/v1/config' ) );
 
-		$this->assertSame( 200, $response->get_status() );
+		$this->assertSame( 401, $response->get_status() );
 	}
 
 	public function test_requires_site_key_when_configured() {
@@ -94,12 +113,15 @@ class Test_Rest_Config_Controller extends WP_UnitTestCase {
 	}
 
 	public function test_includes_post_price_overrides() {
-		update_option( 'crawlpay_settings', \CrawlPay\Settings::default_settings() );
+		update_option(
+			'crawlpay_settings',
+			array_merge( \CrawlPay\Settings::default_settings(), array( 'site_key' => self::TEST_SITE_KEY ) )
+		);
 
 		$post_id = self::factory()->post->create( array( 'post_status' => 'publish' ) );
 		update_post_meta( $post_id, \CrawlPay\Post_Pricing::META_KEY, '99999' );
 
-		$response = $this->server->dispatch( new WP_REST_Request( 'GET', '/crawlpay/v1/config' ) );
+		$response = $this->server->dispatch( $this->authorized_request() );
 		$data     = $response->get_data();
 
 		$found = false;

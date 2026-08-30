@@ -214,7 +214,7 @@ class Settings {
 						<th scope="row"><label for="crawlpay_site_key"><?php esc_html_e( 'Site key', 'crawlpay' ); ?></label></th>
 						<td>
 							<input type="text" id="crawlpay_site_key" name="crawlpay_settings[site_key]" value="<?php echo esc_attr( $settings['site_key'] ); ?>" class="regular-text" autocomplete="off" />
-							<p class="description"><?php esc_html_e( 'Shared secret sent as X-Crawlpay-Site-Key. Must match the middleware\'s CRAWLPAY_SITE_KEY. Leave blank only for local development.', 'crawlpay' ); ?></p>
+							<p class="description"><?php esc_html_e( 'Shared secret sent as X-Crawlpay-Site-Key. Must match the middleware\'s CRAWLPAY_SITE_KEY. The middleware refuses every /verify-and-price call without a matching key, and Mode B fails open when that happens -- leaving this blank does not mean "open access", it means AI crawlers stop being charged at all. Leave blank only for local development.', 'crawlpay' ); ?></p>
 						</td>
 					</tr>
 				</table>

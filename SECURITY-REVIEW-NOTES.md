@@ -60,13 +60,6 @@ was flagged in.
 - **Risk:** If `/verify-and-price` can't be reached (network issue, middleware down/restarting), Mode B lets the request through unmetered rather than blocking it. This was a deliberate choice — the alternative (fail closed) risks serving 402s to legitimate crawlers or making the site look broken during a routine middleware restart — but it does mean any middleware outage is a direct revenue leak with no alerting built in. Worth explicit product sign-off rather than just an engineering default.
 - **Suggested fix:** At minimum, log these fail-open events somewhere visible (currently they're silent from WordPress's perspective); consider whether a persistent/extended outage should eventually flip to fail-closed.
 
-### 8. `/stats`, `/verify-and-price`, and the REST config endpoint are open by default
-
-- **File/function:** `packages/middleware/src/server.ts` — `isAuthorized()`; `packages/wp-plugin/includes/class-rest-config-controller.php` — `check_permission()`
-- **Flagged in:** Phase 5
-- **Risk:** All three endpoints only require the `X-Crawlpay-Site-Key` shared secret if one has been configured; with none set (the out-of-the-box default), they're fully open. `/stats` and the REST config endpoint leak revenue/traffic data and pricing/payout-address configuration; `/verify-and-price` can be hit directly by anyone to trigger real facilitator verification calls and nonce consumption, bypassing WordPress's own classification entirely.
-- **Suggested fix:** Consider making the site key mandatory (refuse to serve these routes at all without one configured) rather than silently falling back to open, at least for production-flagged deployments.
-
 ### 9. Dashboard tenant isolation is application-level only, not database-level
 
 - **File/function:** `packages/dashboard/lib/auth.ts` — `requirePublisher()`; `packages/dashboard/app/dashboard/sites/[id]/actions.ts` — `requireOwnedSite()`
@@ -78,16 +71,23 @@ was flagged in.
 
 - **File/function:** `packages/dashboard/prisma/schema.prisma` — `Site.middlewareDeployKey`
 - **Flagged in:** Phase 6
-- **Risk:** Same pattern already accepted for the middleware's `CRAWLPAY_SITE_KEY` and the WP plugin's `site_key` setting — the bearer secret a deployed middleware presents to `/api/v1/config` and `/api/v1/transactions` is stored as plain text in Postgres, readable by anyone with `crawlpay_app` (or `postgres`-role) database access, with no rotation UI (a compromised key must currently be fixed by deleting and recreating the `Site` row, which also generates a new key but is a destructive workaround, not a real rotation flow).
-- **Suggested fix:** Store a hash (e.g. bcrypt/argon2) and show the plaintext value once at creation, matching how the credential is actually used (presented as a bearer token, never read back by the application itself). Add an explicit "regenerate deploy key" action.
+- **Risk:** Same pattern already accepted for the middleware's `CRAWLPAY_SITE_KEY` and the WP plugin's `site_key` setting — the bearer secret a deployed middleware presents to `/api/v1/config` and `/api/v1/transactions` is stored as plain text in Postgres, readable by anyone with `crawlpay_app` (or `postgres`-role) database access.
+- **Suggested fix:** Store a hash (e.g. bcrypt/argon2) and show the plaintext value once at creation, matching how the credential is actually used (presented as a bearer token, never read back by the application itself). **Still open** — plaintext storage remains as described.
+- **Partially resolved:** the "no rotation UI" half of this — the `regenerateDeployKey` action + a "Regenerate deploy key" button on the site Setup page (PR #12) mean a compromised key no longer requires deleting and recreating the `Site` row. Scoped via `site.updateMany({ where: { id, publisherId } })` so a publisher can only rotate their own site's key (verified against a real DB — see PR #12's commit message for the exact repro).
 
 ### 11. `/api/v1/config` and `/api/v1/transactions` have no rate limiting
 
 - **File/function:** `packages/dashboard/app/api/v1/config/route.ts`, `packages/dashboard/app/api/v1/transactions/route.ts`
 - **Flagged in:** Phase 6
-- **Risk:** Same class of gap as item 8 — these endpoints authenticate via a bearer deploy key with no request-rate limits. A leaked deploy key (or a misbehaving/looping middleware instance) can hammer either endpoint with no backpressure; `/api/v1/transactions` in particular writes a new row per call with no dedupe, so a retry storm inflates the dashboard's own revenue numbers.
-- **Suggested fix:** Same as item 8's suggested fix, applied here too — likely worth solving both at once in the Phase 8 security pass rather than separately.
+- **Risk:** Same class of gap as the now-resolved "open by default" issue below — these endpoints authenticate via a bearer deploy key with no request-rate limits. A leaked deploy key (or a misbehaving/looping middleware instance) can hammer either endpoint with no backpressure; `/api/v1/transactions` in particular writes a new row per call with no dedupe, so a retry storm inflates the dashboard's own revenue numbers.
+- **Suggested fix:** Add rate limiting per deploy key.
 
 ## Resolved items
 
-_(none yet)_
+### `/stats`, `/verify-and-price`, and the REST config endpoint were open by default
+
+- **File/function:** `packages/middleware/src/server.ts` — `isAuthorized()`; `packages/wp-plugin/includes/class-rest-config-controller.php` — `check_permission()`
+- **Originally flagged in:** Phase 5
+- **Was:** All three endpoints only required the `X-Crawlpay-Site-Key` shared secret if one had been configured; with none set (the out-of-the-box default), they were fully open. `/stats` and the REST config endpoint leaked revenue/traffic data and pricing/payout-address configuration; `/verify-and-price` could be hit directly by anyone to trigger real facilitator verification calls and nonce consumption, bypassing WordPress's own classification entirely.
+- **Fix:** Both `isAuthorized()` and `check_permission()` now fail closed (401) when no site key is configured at all, instead of falling back to open. Covered by new negative tests on both sides: no key, wrong key, and the right key, for every gated route (`packages/middleware/src/server.test.ts`, `packages/wp-plugin/tests/test-rest-config-controller.php`).
+- **Known consequence, not a bug:** Mode B's guard fails *open* when `/verify-and-price` is unreachable (see item 7 above, an intentional availability-over-revenue tradeoff). Combined with this fix, a site that never configures a site key on either side now gets zero AI-crawler charging at all (the middleware refuses the call, Mode B treats the refusal as "unreachable" and lets the request through) rather than the old behavior of still charging correctly through an open, unauthenticated endpoint. The site key is therefore now effectively required for Mode B to charge anyone, not just a security nicety — the Settings page copy was updated to say so explicitly.
