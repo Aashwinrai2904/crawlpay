@@ -5,10 +5,10 @@ Merge YouTube auto-generated .vtt caption files into one clean transcript docume
 Expects files produced by:
   yt-dlp --skip-download --write-auto-sub --sub-lang en --sub-format vtt \
     --dateafter 20260601 \
-    -o "%(upload_date)s_%(title)s.%(ext)s" \
+    -o "%(upload_date)s_%(id)s_%(title)s.%(ext)s" \
     "https://www.youtube.com/@vaibhavsisinty/videos"
 
-which yields filenames like: 20260615_My Video Title.en.vtt
+which yields filenames like: 20260615_dQw4w9WgXcQ_My Video Title.en.vtt
 """
 
 import argparse
@@ -16,11 +16,9 @@ import re
 import sys
 from pathlib import Path
 
-CHANNEL_HANDLE = "@vaibhavsisinty"
-CHANNEL_URL = f"https://www.youtube.com/{CHANNEL_HANDLE}"
 OUTPUT_NAME = "vaibhav_sisinty_transcripts_june_to_sept_2026.txt"
 
-FILENAME_RE = re.compile(r"^(\d{8})_(.+)\.\w{2,3}\.vtt$")
+FILENAME_RE = re.compile(r"^(\d{8})_([A-Za-z0-9_-]{11})_(.+)\.\w{2,3}\.vtt$")
 TIME_LINE_RE = re.compile(r"^\d{2}:\d{2}:\d{2}[.,]\d{3}\s*-->")
 TAG_RE = re.compile(r"<[^>]+>")
 
@@ -29,8 +27,8 @@ def parse_filename(filename: str):
     m = FILENAME_RE.match(filename)
     if not m:
         return None
-    date_str, title = m.group(1), m.group(2)
-    return date_str, title
+    date_str, video_id, title = m.group(1), m.group(2), m.group(3)
+    return date_str, video_id, title
 
 
 def format_date(date_str: str) -> str:
@@ -102,18 +100,18 @@ def build_master_document(folder: Path) -> str:
         if not parsed:
             print(f"Skipping (unrecognized filename pattern): {f.name}", file=sys.stderr)
             continue
-        date_str, title = parsed
+        date_str, video_id, title = parsed
         clean_text = vtt_to_clean_text(f)
-        entries.append((date_str, title, clean_text))
+        entries.append((date_str, video_id, title, clean_text))
 
-    entries.sort(key=lambda e: (e[0], e[1]))
+    entries.sort(key=lambda e: (e[0], e[2]))
 
     parts = []
-    for date_str, title, clean_text in entries:
+    for date_str, video_id, title, clean_text in entries:
         parts.append("=" * 80)
         parts.append(f"Title: {title}")
         parts.append(f"Upload Date: {format_date(date_str)}")
-        parts.append(f"YouTube Channel: {CHANNEL_URL}")
+        parts.append(f"YouTube URL: https://www.youtube.com/watch?v={video_id}")
         parts.append("=" * 80)
         parts.append("")
         parts.append(clean_text if clean_text else "[No caption text found]")
