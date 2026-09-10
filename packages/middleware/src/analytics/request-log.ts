@@ -155,11 +155,11 @@ export class InMemoryRequestLog implements RequestLog {
 
 /** Discards everything -- used when request logging is explicitly disabled. */
 export class NullRequestLog implements RequestLog {
-  async record(): Promise<void> {
+  async record(_entry: RequestLogEntry): Promise<void> {
     // intentionally empty
   }
 
-  async query(): Promise<RequestLogEntry[]> {
+  async query(_query: RequestLogQuery): Promise<RequestLogEntry[]> {
     return [];
   }
 }
