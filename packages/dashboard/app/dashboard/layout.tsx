@@ -19,6 +19,7 @@ export default async function DashboardLayout({ children }: { children: ReactNod
             CrawlPay
           </Link>
           <nav className="app-nav">
+            <Link href="/dashboard/analytics">Analytics</Link>
             {sites.map((site) => (
               <Link key={site.id} href={`/dashboard/sites/${site.id}/pricing`}>
                 {site.domain}
