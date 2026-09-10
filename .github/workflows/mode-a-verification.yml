@@ -1,0 +1,51 @@
+name: Mode A live verification
+
+# Task 3: stand the CrawlPay middleware up as a real reverse proxy in front of
+# a real WordPress + MySQL (infra/docker-compose.test-mode-a.yml) and run the
+# payment-gate + passthrough assertions in infra/mode-a/test-mode-a.sh.
+#
+# The script's exit code is the number of failed assertions, so this check is
+# red while any assertion fails -- that red is the report, not a broken test.
+
+on:
+  push:
+    paths:
+      - "infra/docker-compose.test-mode-a.yml"
+      - "infra/mode-a/**"
+      - "packages/middleware/**"
+      - "packages/core/**"
+      - ".github/workflows/mode-a-verification.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: mode-a-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run the Mode A verification
+        # --keep: leave the stack up so the next step can capture logs;
+        # teardown happens in "Force teardown" below.
+        run: bash infra/mode-a/test-mode-a.sh --keep
+
+      - name: Stack logs (always)
+        if: always()
+        run: |
+          docker compose -f infra/docker-compose.test-mode-a.yml ps || true
+          for svc in middleware wordpress mock-facilitator db redis; do
+            echo "::group::logs: $svc"
+            docker compose -f infra/docker-compose.test-mode-a.yml logs "$svc" 2>&1 | tail -120 || true
+            echo "::endgroup::"
+          done
+
+      - name: Force teardown (always)
+        if: always()
+        run: docker compose -f infra/docker-compose.test-mode-a.yml down -v --remove-orphans || true
