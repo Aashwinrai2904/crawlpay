@@ -8,7 +8,10 @@ and search engines pass through untouched.
 Three pieces work together:
 
 - **The publisher dashboard** (`packages/dashboard`) — where a publisher signs in, adds a site,
-  sets pricing/policy per bot type, and watches revenue come in.
+  sets pricing/policy per bot type, and watches revenue come in. Setting a payout wallet is not
+  wired up in the dashboard yet: that field currently ships only in the WordPress plugin, so
+  dashboard-managed sites can't receive payment until it lands
+  ([#24](https://github.com/Aashwinrai2904/crawlpay/issues/24)).
 - **The WordPress plugin** (`packages/wp-plugin`) — the easiest way to connect a site to CrawlPay.
   See [Installing the WordPress plugin](#installing-the-wordpress-plugin) below.
 - **The middleware** (`packages/middleware`) — the piece that actually classifies traffic, runs
@@ -27,8 +30,9 @@ web's own (long-unused) `402 Payment Required` status code. CrawlPay's request f
    the default for humans and search engines, so SEO is never affected), **block** (403, no
    content, no charge), or **charge** (the default for AI crawlers).
 3. On `charge`, CrawlPay responds `402 Payment Required` with a JSON body naming the price, the
-   asset (USDC), the network, and the publisher's payout address — this *is* the x402 protocol's
-   payment-required response shape, not a CrawlPay-specific format.
+   asset (USDC), the network, and — where a payout wallet has been configured (currently the
+   WordPress plugin path only, see above) — the publisher's payout address. This *is* the x402
+   protocol's payment-required response shape, not a CrawlPay-specific format.
 4. A crawler that wants to pay resubmits the same request with an `X-Payment` header containing a
    payment proof. CrawlPay verifies it against a facilitator (the service that checks the proof is
    real and settles the transfer), then serves the content and logs the transaction.
