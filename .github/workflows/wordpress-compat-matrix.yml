@@ -1,0 +1,280 @@
+name: WordPress compatibility matrix
+
+# Task 2: does the CrawlPay WordPress plugin actually work on the PHP and
+# WordPress versions real people run? For each PHP x WP combination this
+# builds the plugin zip, installs it into a throwaway WordPress via
+# @wordpress/env, exercises Mode B against a real running middleware
+# (GPTBot -> 402, human -> 200), then uninstalls and asserts the plugin
+# left nothing behind in the database.
+
+on:
+  push:
+    paths:
+      - "packages/wp-plugin/**"
+      - ".github/workflows/wordpress-compat-matrix.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: wp-compat-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  resolve-wp:
+    name: Resolve WordPress versions (latest, -1, -2)
+    runs-on: ubuntu-latest
+    outputs:
+      versions: ${{ steps.pick.outputs.versions }}
+    steps:
+      - id: pick
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json, os, re, sys, urllib.request
+
+          FALLBACK = ["6.7", "6.6", "6.5"]
+          try:
+              data = json.load(
+                  urllib.request.urlopen(
+                      "https://api.wordpress.org/core/stable-check/1.0/", timeout=30
+                  )
+              )
+
+              def parts(v):
+                  return ([int(x) for x in v.split(".")] + [0, 0])[:3]
+
+              releases = [v for v in data if re.fullmatch(r"\d+\.\d+(?:\.\d+)?", v)]
+              by_minor = {}
+              for v in releases:
+                  by_minor.setdefault(tuple(parts(v)[:2]), []).append(v)
+              latest_three = sorted(by_minor)[-3:]
+              picks = [max(by_minor[m], key=parts) for m in latest_three]
+              picks.reverse()  # latest first
+              if len(picks) < 3:
+                  raise ValueError(f"only resolved {picks}")
+          except Exception as e:  # any failure -> use the fallback list
+              print(f"stable-check lookup failed ({e}); using fallback {FALLBACK}", file=sys.stderr)
+              picks = FALLBACK
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as fh:
+              fh.write("versions=" + json.dumps(picks) + "\n")
+          print("resolved:", picks)
+          PY
+      - run: 'echo "Matrix WordPress versions: ${{ steps.pick.outputs.versions }}"'
+
+  compat:
+    name: PHP ${{ matrix.php }} x WP ${{ matrix.wp }}
+    needs: resolve-wp
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ["8.1", "8.2", "8.3", "8.4"]
+        wp: ${{ fromJSON(needs.resolve-wp.outputs.versions) }}
+    env:
+      WP_URL: http://localhost:8888
+      MIDDLEWARE_PORT: "8787"
+      SITE_KEY: test-key
+      GPTBOT_UA: "Mozilla/5.0 (compatible; GPTBot/1.2; +https://openai.com/gptbot)"
+      HUMAN_UA: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.21.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build @crawlpay/core + @crawlpay/middleware
+        run: |
+          pnpm --filter @crawlpay/core build
+          pnpm --filter @crawlpay/middleware build
+
+      - name: Start the middleware in the background
+        run: |
+          set -euo pipefail
+          CRAWLPAY_SITE_KEY="$SITE_KEY" PORT="$MIDDLEWARE_PORT" \
+            nohup node packages/middleware/dist/index.js \
+            > "$RUNNER_TEMP/middleware.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/middleware.pid"
+          for _ in $(seq 1 30); do
+            if curl -sf "http://localhost:$MIDDLEWARE_PORT/health" >/dev/null; then
+              echo "middleware healthy:"; curl -s "http://localhost:$MIDDLEWARE_PORT/health"; echo
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::middleware never became healthy"
+          cat "$RUNNER_TEMP/middleware.log"
+          exit 1
+
+      - name: Build the plugin zip
+        id: zip
+        run: |
+          set -euo pipefail
+          bash packages/wp-plugin/build/build.sh
+          ZIP="$(ls packages/wp-plugin/build/dist/crawlpay-*.zip)"
+          echo "name=$(basename "$ZIP")" >> "$GITHUB_OUTPUT"
+          echo "Built: $ZIP"
+          unzip -l "$ZIP"
+
+      - name: Install @wordpress/env
+        # Not pinned: PHP 8.4 as a valid phpVersion needs a recent release, and
+        # this workflow is about "current versions" by definition.
+        run: npm install -g @wordpress/env@latest
+
+      - name: Write .wp-env.json
+        run: |
+          cat > .wp-env.json <<'JSON'
+          {
+            "core": "https://wordpress.org/wordpress-${{ matrix.wp }}.zip",
+            "phpVersion": "${{ matrix.php }}",
+            "plugins": [],
+            "mappings": {
+              "wp-content/uploads/crawlpay-dist": "./packages/wp-plugin/build/dist"
+            },
+            "config": {
+              "WP_DEBUG": true,
+              "WP_DEBUG_DISPLAY": false,
+              "WP_DEBUG_LOG": true
+            }
+          }
+          JSON
+          cat .wp-env.json
+
+      - name: Start WordPress (wp-env)
+        run: wp-env start
+
+      - name: Find a host address the WP container can reach the middleware on
+        run: |
+          set -euo pipefail
+          RUNNER_IP="$(ip -4 route get 1.1.1.1 | grep -oP 'src \K[0-9.]+')"
+          echo "runner primary IP: $RUNNER_IP"
+          PROBE=packages/wp-plugin/build/dist/_probe.php
+          FOUND=""
+          for HOST in "$RUNNER_IP" host.docker.internal; do
+          cat > "$PROBE" <<PHP
+          <?php
+          \$r = wp_remote_get( 'http://$HOST:$MIDDLEWARE_PORT/health', array( 'timeout' => 5 ) );
+          echo is_wp_error( \$r ) ? 'ERR' : (string) (int) wp_remote_retrieve_response_code( \$r );
+          PHP
+            OUT="$(wp-env run cli wp eval-file wp-content/uploads/crawlpay-dist/_probe.php 2>/dev/null | tr -d '[:space:]')"
+            echo "  via $HOST => ${OUT:-<none>}"
+            if [ "$OUT" = "200" ]; then FOUND="$HOST"; break; fi
+          done
+          if [ -z "$FOUND" ]; then
+            echo "::error::WP container could not reach the middleware via any known host address"
+            exit 1
+          fi
+          echo "MIDDLEWARE_HOST=$FOUND" >> "$GITHUB_ENV"
+          echo "using middleware host: $FOUND"
+
+      - name: Install + activate the plugin, configure Mode B
+        run: |
+          set -euo pipefail
+          W() { wp-env run cli wp "$@"; }
+          W plugin install "wp-content/uploads/crawlpay-dist/${{ steps.zip.outputs.name }}" --activate
+          W plugin list --status=active --fields=name,status,version
+          W option patch update crawlpay_settings mode mode_b
+          W option patch update crawlpay_settings middleware_url "http://$MIDDLEWARE_HOST:$MIDDLEWARE_PORT"
+          W option patch update crawlpay_settings site_key "$SITE_KEY"
+          W option patch update crawlpay_settings policy ai-crawler charge
+          echo "effective crawlpay_settings:"
+          W option get crawlpay_settings --format=json
+
+      - name: "Assert: GPTBot request is charged (HTTP 402)"
+        id: assert_402
+        run: |
+          set -euo pipefail
+          CODE="$(curl -s -o "$RUNNER_TEMP/gptbot.body" -w '%{http_code}' -A "$GPTBOT_UA" "$WP_URL/")"
+          echo "GPTBot  GET /  => $CODE"
+          echo "--- body (first 500 bytes) ---"; head -c 500 "$RUNNER_TEMP/gptbot.body"; echo
+          if [ "$CODE" != "402" ]; then
+            echo "::error::expected 402 for GPTBot, got $CODE"
+            exit 1
+          fi
+
+      - name: "Assert: human request passes through (HTTP 200)"
+        id: assert_200
+        run: |
+          set -euo pipefail
+          CODE="$(curl -s -o /dev/null -w '%{http_code}' -A "$HUMAN_UA" "$WP_URL/")"
+          echo "human   GET /  => $CODE"
+          if [ "$CODE" != "200" ]; then
+            echo "::error::expected 200 for a human request, got $CODE"
+            exit 1
+          fi
+
+      - name: Deactivate + uninstall the plugin
+        id: uninstall
+        run: |
+          set -euo pipefail
+          W() { wp-env run cli wp "$@"; }
+          W plugin deactivate crawlpay
+          W plugin uninstall crawlpay
+          W plugin list --fields=name,status
+
+      - name: "Assert: no crawlpay_* options or tables survive uninstall"
+        id: assert_clean
+        run: |
+          set -euo pipefail
+          W() { wp-env run cli wp "$@"; }
+          LEFTOVER_OPTS="$(W option list --search='*crawlpay*' --format=count | tr -dc '0-9')"
+          echo "leftover crawlpay option rows: ${LEFTOVER_OPTS:-0}"
+          W option list --search='*crawlpay*' --fields=option_name || true
+          LEFTOVER_TABLES="$(wp-env run cli wp db tables '*crawlpay*' --all-tables 2>/dev/null | tr -d '[:space:]' || true)"
+          echo "leftover crawlpay tables: [${LEFTOVER_TABLES}]"
+          FAIL=0
+          if W option get crawlpay_settings >/dev/null 2>&1; then
+            echo "::error::crawlpay_settings option still present after uninstall"; FAIL=1
+          fi
+          if [ "${LEFTOVER_OPTS:-0}" != "0" ]; then
+            echo "::error::crawlpay_* option rows remain after uninstall"; FAIL=1
+          fi
+          if [ -n "$LEFTOVER_TABLES" ]; then
+            echo "::error::crawlpay_* tables remain after uninstall"; FAIL=1
+          fi
+          exit $FAIL
+
+      - name: Diagnostics (on failure)
+        if: failure()
+        run: |
+          echo "===== middleware.log ====="
+          cat "$RUNNER_TEMP/middleware.log" 2>/dev/null || echo "(none)"
+          echo "===== WP debug.log: crawlpay lines ====="
+          wp-env run cli bash -c "cat wp-content/debug.log 2>/dev/null" 2>/dev/null | grep -i crawlpay || echo "(no crawlpay lines)"
+          echo "===== wp-env logs ====="
+          wp-env logs --watch=false 2>&1 | tail -80 || true
+
+      - name: Summary row
+        if: always()
+        run: |
+          {
+            echo "### PHP ${{ matrix.php }} x WP ${{ matrix.wp }}"
+            echo ""
+            echo "| check | result |"
+            echo "| --- | --- |"
+            echo "| GPTBot -> 402 | ${{ steps.assert_402.outcome }} |"
+            echo "| human -> 200 | ${{ steps.assert_200.outcome }} |"
+            echo "| deactivate + uninstall | ${{ steps.uninstall.outcome }} |"
+            echo "| clean DB after uninstall | ${{ steps.assert_clean.outcome }} |"
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Tear down
+        if: always()
+        run: |
+          wp-env stop 2>/dev/null || true
+          if [ -f "$RUNNER_TEMP/middleware.pid" ]; then
+            kill "$(cat "$RUNNER_TEMP/middleware.pid")" 2>/dev/null || true
+          fi

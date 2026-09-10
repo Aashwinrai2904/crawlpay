@@ -11,3 +11,7 @@ coverage/
 .env.*.local
 .DS_Store
 tsconfig.tsbuildinfo
+
+# wp-env (WordPress compat matrix) local/CI scratch config
+.wp-env.json
+.wp-env.override.json
