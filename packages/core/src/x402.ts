@@ -3,11 +3,23 @@ import { z } from "zod";
 /**
  * Wire-format schemas for the x402 payment handshake (HTTP 402 Payment
  * Required, with a machine-readable payment manifest in the response body
- * and a proof-of-payment header on retry). Field names follow the public
- * x402 spec (https://www.x402.org/) so a real facilitator or client can
- * speak this without translation. `nonce` is the one crawlpay-specific
- * addition: a single-use token our own NonceStore enforces, independent of
- * whatever replay protection the eventual "exact" scheme signature carries.
+ * and a proof-of-payment header on retry).
+ *
+ * CONFORMANCE (see docs/x402-CONFORMANCE.md for the full field-by-field
+ * comparison against x402@1.2.0 and the live base-sepolia facilitator):
+ *  - The 402 body (PaymentRequirementsResponse / PaymentRequirements) is
+ *    close to spec-compliant -- a real x402 client parses it -- apart from
+ *    the extra top-level `nonce` below, `asset` being a symbol rather than
+ *    a token contract address, and a missing `extra` (EIP-712 domain).
+ *  - PaymentProofSchema, and the facilitator /verify request/response
+ *    shapes in facilitator-client.ts, are a mock-only stub and do NOT
+ *    match the spec (no signature / EIP-3009 authorization; `payload` vs
+ *    `paymentPayload`; `valid` vs `isValid`). They only interoperate with
+ *    infra/mock-facilitator, not a spec-compliant facilitator.
+ *
+ * `nonce` is the one crawlpay-specific addition to PaymentRequirements: a
+ * single-use token our own NonceStore enforces, separate from the spec's
+ * in-payload EIP-3009 `authorization.nonce`.
  */
 
 export const PaymentRequirementsSchema = z.object({
