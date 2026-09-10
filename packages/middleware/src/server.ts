@@ -9,7 +9,17 @@ import {
 import Fastify, { type FastifyInstance, type FastifyServerOptions } from "fastify";
 import { z } from "zod";
 import { resolveCharge } from "./charge";
-import { classifyRequest, resolvePolicy, type BotSignatureConfig } from "./bot-detection";
+import {
+  aggregateRequests,
+  PostgresRequestLog,
+  type RequestLog,
+} from "./analytics";
+import {
+  classifyRequest,
+  identifyBotName,
+  resolvePolicy,
+  type BotSignatureConfig,
+} from "./bot-detection";
 import {
   cacheMetrics,
   getCachedOrFetch,
@@ -73,6 +83,20 @@ export interface BuildServerOptions {
   nonceStore?: NonceStore;
   facilitatorClient?: PaymentVerifier;
   transactionLog?: TransactionLog;
+  /**
+   * Records one row per classified request (allow / block / 402 / paid)
+   * for the dashboard's bot-traffic analytics view. Defaults to a
+   * PostgresRequestLog against CRAWLPAY_DATABASE_URL; inject
+   * InMemoryRequestLog/NullRequestLog in tests or to disable it.
+   */
+  requestLog?: RequestLog;
+  /**
+   * The dashboard Site id this deployment fronts, stamped onto every
+   * request_log row so GET /api/v1/analytics/requests?siteId=... can
+   * filter to it. Defaults to CRAWLPAY_SITE_ID. Leave unset for a
+   * standalone middleware not tied to a dashboard site.
+   */
+  siteId?: string;
   fetchImpl?: typeof fetch;
   logger?: FastifyServerOptions["logger"];
   /**
@@ -108,6 +132,9 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
   const wordpressUrl = options.wordpressUrl ?? process.env.CRAWLPAY_WORDPRESS_URL;
   const dashboardUrl = options.dashboardUrl ?? process.env.CRAWLPAY_DASHBOARD_URL;
   const dashboardDeployKey = options.dashboardDeployKey ?? process.env.CRAWLPAY_DASHBOARD_DEPLOY_KEY;
+
+  const siteId = options.siteId ?? process.env.CRAWLPAY_SITE_ID ?? null;
+  const requestLog = options.requestLog ?? new PostgresRequestLog();
 
   const transactionLog =
     options.transactionLog ??
@@ -191,6 +218,36 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
     };
   });
 
+  // Bot-traffic analytics for the dashboard's /dashboard/analytics view:
+  // every classified request in the last `hours` hours (default 24, capped
+  // at a week), rolled up by bot, by page, and by hour, plus a bot x page
+  // heatmap. Guarded by the same X-Crawlpay-Site-Key shared secret as
+  // /stats -- it exposes the same traffic/pricing-adjacent data.
+  app.get("/api/v1/analytics/requests", async (request, reply) => {
+    if (!isAuthorized(normalizeHeaders(request.headers))) {
+      reply.code(401);
+      return { error: "unauthorized" };
+    }
+
+    const query = request.query as { siteId?: string; hours?: string };
+    const requestedSiteId = query.siteId?.trim() || undefined;
+    const hoursRaw = Number(query.hours ?? 24);
+    const hours = Number.isFinite(hoursRaw)
+      ? Math.min(Math.max(Math.trunc(hoursRaw), 1), 168)
+      : 24;
+    const since = new Date(Date.now() - hours * 60 * 60 * 1000);
+    const filterSiteId = requestedSiteId ?? siteId ?? undefined;
+
+    const entries = await requestLog.query({ siteId: filterSiteId, since });
+
+    return {
+      siteId: filterSiteId ?? null,
+      hours,
+      since: since.toISOString(),
+      ...aggregateRequests(entries),
+    };
+  });
+
   // Synchronous charge check for WordPress Mode B (shared hosting, can't
   // reverse-proxy): WP already did its own lightweight UA-based
   // classification and only calls this once it believes a request is an
@@ -247,9 +304,28 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
     const publisherConfig = publisherConfigSource.getConfig();
     const headers = normalizeHeaders(request.headers);
     const classification = classifyRequest(headers, request.ip, botSignatureConfig);
+    const botName = identifyBotName(headers, botSignatureConfig);
     const action = resolvePolicy(classification, publisherConfig.policy);
     const publicUrl = publicUrlFor(request);
     const log = request.log.child({ classification, action, path: request.url });
+
+    // Fire-and-forget: one request_log row per request, whatever the
+    // outcome. Never awaited on the response path and rejections are
+    // swallowed, so an analytics-logging outage can't slow down or fail a
+    // request. request.url (path + query) is the resource, matching the
+    // dashboard's per-page grouping.
+    const recordRequest = (responseCode: number) => {
+      void requestLog
+        .record({
+          timestamp: new Date(),
+          siteId,
+          botName,
+          resource: request.url,
+          classification,
+          responseCode,
+        })
+        .catch((err) => log.warn({ err }, "failed to record request log"));
+    };
 
     const serveFromOrigin = async () => {
       try {
@@ -259,10 +335,13 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
           { store: cacheStore },
         );
         log.info({ cacheHit: result.cacheHit }, "served");
-        return respondWithOrigin(reply, result);
+        const body = respondWithOrigin(reply, result);
+        recordRequest(reply.statusCode);
+        return body;
       } catch (err) {
         log.error({ err }, "origin fetch failed");
         reply.code(502);
+        recordRequest(502);
         return { error: "bad gateway" };
       }
     };
@@ -270,6 +349,7 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
     if (action === "block") {
       log.info("blocked");
       reply.code(403);
+      recordRequest(403);
       return { error: "forbidden" };
     }
 
@@ -286,7 +366,9 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
 
     if (decision.outcome !== "paid") {
       log.info({ paymentOutcome: decision.outcome }, "payment required");
-      return respondWithPaymentRequired(reply, publicUrl, publisherConfig.pricing);
+      const body = respondWithPaymentRequired(reply, publicUrl, publisherConfig.pricing);
+      recordRequest(reply.statusCode);
+      return body;
     }
 
     // The payment already verified successfully — a logging/audit-trail

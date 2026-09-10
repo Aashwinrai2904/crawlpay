@@ -56,11 +56,39 @@ export function classifyRequest(
 }
 
 function matchesAny(userAgent: string, entries: BotSignatureEntry[]): boolean {
-  return entries.some((entry) => {
+  return matchNamed(userAgent, entries) !== null;
+}
+
+function matchNamed(userAgent: string, entries: BotSignatureEntry[]): string | null {
+  for (const entry of entries) {
+    let matched: boolean;
     try {
-      return new RegExp(entry.userAgentPattern, "i").test(userAgent);
+      matched = new RegExp(entry.userAgentPattern, "i").test(userAgent);
     } catch {
-      return userAgent.toLowerCase().includes(entry.userAgentPattern.toLowerCase());
+      matched = userAgent.toLowerCase().includes(entry.userAgentPattern.toLowerCase());
     }
-  });
+    if (matched) return entry.name;
+  }
+  return null;
+}
+
+/**
+ * The human-readable actor label the analytics view groups by: the name
+ * of the matched crawler signature ("GPTBot", "Googlebot", ...), or
+ * "unknown-bot" / "human" when nothing in the lists matches. Kept
+ * alongside classifyRequest so the two never disagree about what counts
+ * as a bot, but separate because the classification enum deliberately
+ * collapses every named AI crawler into "ai-crawler".
+ */
+export function identifyBotName(
+  headers: Record<string, string>,
+  config: BotSignatureConfig = defaultBotSignatureConfig,
+): string {
+  const userAgent = findHeader(headers, "user-agent") ?? "";
+
+  return (
+    matchNamed(userAgent, config.aiCrawlers) ??
+    matchNamed(userAgent, config.searchCrawlers) ??
+    (classifyRequest(headers, "", config) === "human" ? "human" : "unknown-bot")
+  );
 }
