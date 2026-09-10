@@ -124,6 +124,9 @@ export function aggregateRequests(entries: RequestLogEntry[]): RequestAnalytics 
     }
   }
 
+  // Deterministic, environment-independent string order (no locale/ICU
+  // dependence) so aggregate output is stable across machines and CI.
+  const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
   const byRequestsDesc = (a: OutcomeCounts, b: OutcomeCounts) => b.requests - a.requests;
 
   return {
@@ -138,18 +141,16 @@ export function aggregateRequests(entries: RequestLogEntry[]): RequestAnalytics 
         paid: c.paid,
         pages: c.pages.size,
       }))
-      .sort((a, b) => byRequestsDesc(a, b) || a.botName.localeCompare(b.botName)),
+      .sort((a, b) => byRequestsDesc(a, b) || cmp(a.botName, b.botName)),
     byPage: [...byPage.entries()]
       .map(([resource, c]) => ({ resource, ...c }))
-      .sort((a, b) => byRequestsDesc(a, b) || a.resource.localeCompare(b.resource)),
+      .sort((a, b) => byRequestsDesc(a, b) || cmp(a.resource, b.resource)),
     byHour: [...byHour.entries()]
       .map(([hour, c]) => ({ hour, ...c }))
-      .sort((a, b) => a.hour.localeCompare(b.hour)),
+      .sort((a, b) => cmp(a.hour, b.hour)),
     heatmap: [...heatmap.values()].sort(
       (a, b) =>
-        b.requests - a.requests ||
-        a.botName.localeCompare(b.botName) ||
-        a.resource.localeCompare(b.resource),
+        b.requests - a.requests || cmp(a.botName, b.botName) || cmp(a.resource, b.resource),
     ),
   };
 }
