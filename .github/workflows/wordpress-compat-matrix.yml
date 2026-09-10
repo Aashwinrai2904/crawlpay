@@ -95,10 +95,13 @@ jobs:
       - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build @crawlpay/core + @crawlpay/middleware
-        run: |
-          pnpm --filter @crawlpay/core build
-          pnpm --filter @crawlpay/middleware build
+      - name: Build the workspace packages the middleware needs
+        # Everything except the dashboard (its `next build` needs Postgres and
+        # is irrelevant here). This covers @crawlpay/core plus the
+        # infra/mock-* packages, whose compiled dist/ the middleware's own
+        # tsc build resolves for src/server.test.ts -- building middleware
+        # alone fails with TS2307 on "mock-facilitator" / "mock-origin".
+        run: pnpm -r --filter='!@crawlpay/dashboard' run build
 
       - name: Start the middleware in the background
         run: |
