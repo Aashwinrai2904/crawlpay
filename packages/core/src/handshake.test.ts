@@ -1,11 +1,10 @@
-import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { build402Response } from "./response";
 import { parsePaymentProof } from "./proof";
 import { base64UrlEncode } from "./utils";
 import type { PaymentProof, PaymentRequirements } from "./x402";
 
-function buildRequirements(nonce: string): PaymentRequirements {
+function buildRequirements(): PaymentRequirements {
   return {
     scheme: "exact",
     network: "base-sepolia",
@@ -16,7 +15,26 @@ function buildRequirements(nonce: string): PaymentRequirements {
     payTo: "0xPUBLISHER00000000000000000000000000000",
     maxTimeoutSeconds: 60,
     asset: "USDC",
-    nonce,
+  };
+}
+
+/** A well-formed exact/EVM proof -- fake signature, real EIP-3009 shape. */
+function buildProof(nonce: string): PaymentProof {
+  return {
+    x402Version: 1,
+    scheme: "exact",
+    network: "base-sepolia",
+    payload: {
+      signature: "0x" + "ab".repeat(65),
+      authorization: {
+        from: "0x857b06519E91e3A54538791bDbb0E22373e36b66",
+        to: "0xPUBLISHER00000000000000000000000000000",
+        value: "10000",
+        validAfter: "0",
+        validBefore: "9999999999",
+        nonce,
+      },
+    },
   };
 }
 
@@ -26,21 +44,14 @@ function encodeProofHeader(proof: PaymentProof): string {
 
 describe("x402 handshake round trip", () => {
   it("builds a spec-shaped 402 response and parses the matching proof back out", () => {
-    const nonce = randomUUID();
-    const requirements = buildRequirements(nonce);
+    const requirements = buildRequirements();
 
     const response = build402Response(requirements);
     expect(response.status).toBe(402);
     expect(response.headers["content-type"]).toBe("application/json");
     expect(response.body).toEqual({ x402Version: 1, accepts: [requirements] });
 
-    const proof: PaymentProof = {
-      x402Version: 1,
-      scheme: "exact",
-      network: "base-sepolia",
-      nonce,
-      payload: { note: "opaque until Phase 2" },
-    };
+    const proof = buildProof("0xf3746613c2d920b5fdabc0856f2aeb2d4f88ee6037b8cc5d04a71a4462f13480");
 
     const headers = { "X-Payment": encodeProofHeader(proof) };
     expect(parsePaymentProof(headers)).toEqual(proof);
@@ -63,5 +74,17 @@ describe("parsePaymentProof malformed input", () => {
   it("returns null when the decoded JSON fails schema validation", () => {
     const badProof = base64UrlEncode(JSON.stringify({ scheme: "exact" }));
     expect(parsePaymentProof({ "x-payment": badProof })).toBeNull();
+  });
+
+  it("returns null when payload is missing the EIP-3009 authorization", () => {
+    const shallowProof = base64UrlEncode(
+      JSON.stringify({
+        x402Version: 1,
+        scheme: "exact",
+        network: "base-sepolia",
+        payload: { note: "opaque, no signature" },
+      }),
+    );
+    expect(parsePaymentProof({ "x-payment": shallowProof })).toBeNull();
   });
 });

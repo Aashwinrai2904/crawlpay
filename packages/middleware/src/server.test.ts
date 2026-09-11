@@ -91,6 +91,26 @@ function encodePaymentHeader(proof: PaymentProof): string {
   return base64UrlEncode(JSON.stringify(proof));
 }
 
+/** A well-formed exact/EVM proof -- fake signature, real EIP-3009 shape. `nonce` is the anti-replay key. */
+function makeProof(nonce: string, overrides: { from?: string } = {}): PaymentProof {
+  return {
+    x402Version: 1,
+    scheme: "exact",
+    network: "base-sepolia",
+    payload: {
+      signature: "0x" + "ab".repeat(65),
+      authorization: {
+        from: overrides.from ?? "0x857b06519E91e3A54538791bDbb0E22373e36b66",
+        to: "0xPUBLISHER00000000000000000000000000000",
+        value: "10000",
+        validAfter: "0",
+        validBefore: "9999999999",
+        nonce,
+      },
+    },
+  };
+}
+
 const HUMAN_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/128.0 Safari/537.36";
 const GOOGLEBOT_UA = "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)";
@@ -177,13 +197,7 @@ describe("charge (ai-crawler)", () => {
     await nonceStore.consume("already-used-nonce");
     const app = buildTestServer({ nonceStore });
 
-    const proof: PaymentProof = {
-      x402Version: 1,
-      scheme: "exact",
-      network: "base-sepolia",
-      nonce: "already-used-nonce",
-      payload: {},
-    };
+    const proof = makeProof("already-used-nonce");
 
     const response = await app.inject({
       method: "GET",
@@ -203,13 +217,7 @@ describe("charge (ai-crawler)", () => {
     };
     const app = buildTestServer({ transactionLog });
 
-    const proof: PaymentProof = {
-      x402Version: 1,
-      scheme: "exact",
-      network: "base-sepolia",
-      nonce: "fresh-nonce-1",
-      payload: {},
-    };
+    const proof = makeProof("fresh-nonce-1");
 
     const response = await app.inject({
       method: "GET",
@@ -223,24 +231,20 @@ describe("charge (ai-crawler)", () => {
     expect(recorded).toHaveLength(1);
     expect(recorded[0]?.botClassification).toBe("ai-crawler");
     expect(recorded[0]?.amount).toBe("10000");
-    // mock-facilitator's /verify reads a top-level `payer` off the payload it
-    // receives (our whole PaymentProof); since PaymentProof has no such
-    // field, it falls back to its own mock payer string.
-    expect(recorded[0]?.payer).toBe("0xMOCKPAYER00000000000000000000000000000");
+    // mock-facilitator's /verify reads paymentPayload.payload.authorization.from
+    // (the payer the client's proof itself claims) -- not something it or a
+    // real facilitator invents.
+    expect(recorded[0]?.payer).toBe("0x857b06519E91e3A54538791bDbb0E22373e36b66");
   });
 
   it("rejects with a fresh 402 (not a crash) when the facilitator reports the proof invalid", async () => {
     const app = buildTestServer({
-      facilitatorClient: { verify: async () => ({ valid: false, error: "insufficient funds" }) },
+      facilitatorClient: {
+        verify: async () => ({ isValid: false, invalidReason: "insufficient_funds" }),
+      },
     });
 
-    const proof: PaymentProof = {
-      x402Version: 1,
-      scheme: "exact",
-      network: "base-sepolia",
-      nonce: "fresh-nonce-2",
-      payload: {},
-    };
+    const proof = makeProof("fresh-nonce-2");
 
     const response = await app.inject({
       method: "GET",
@@ -279,13 +283,7 @@ describe("GET /stats", () => {
   it("reports cache and revenue counters as JSON", async () => {
     const app = buildTestServer({ siteKey: SITE_KEY });
 
-    const proof: PaymentProof = {
-      x402Version: 1,
-      scheme: "exact",
-      network: "base-sepolia",
-      nonce: "stats-nonce-1",
-      payload: {},
-    };
+    const proof = makeProof("stats-nonce-1");
     await app.inject({
       method: "GET",
       url: "/premium-article.html",
@@ -361,13 +359,7 @@ describe("POST /verify-and-price (Mode B synchronous check)", () => {
     };
     const app = buildTestServer({ siteKey: SITE_KEY, transactionLog });
 
-    const proof: PaymentProof = {
-      x402Version: 1,
-      scheme: "exact",
-      network: "base-sepolia",
-      nonce: "verify-and-price-nonce-1",
-      payload: {},
-    };
+    const proof = makeProof("verify-and-price-nonce-1");
 
     const response = await app.inject({
       method: "POST",
@@ -535,13 +527,7 @@ describe("dashboardUrl (polling the Phase 6 dashboard, takes priority over wordp
       expect(response.json().accepts[0].payTo).toBe("0xFROMDASHBOARD000000000000000000000000");
     });
 
-    const proof: PaymentProof = {
-      x402Version: 1,
-      scheme: "exact",
-      network: "base-sepolia",
-      nonce: "dashboard-wiring-nonce",
-      payload: {},
-    };
+    const proof = makeProof("dashboard-wiring-nonce");
     const paid = await app.inject({
       method: "GET",
       url: "/premium-article.html",

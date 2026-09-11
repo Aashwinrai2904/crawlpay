@@ -48,7 +48,11 @@ export async function resolveCharge(
     };
   }
 
-  const nonceIsFresh = await deps.nonceStore.consume(proof.nonce);
+  // Anti-replay keys off the client's own EIP-3009 authorization nonce (a
+  // bytes32 the client generates as part of what it signs) rather than a
+  // separate crawlpay-minted token -- PaymentRequirements no longer has a
+  // nonce field to mint one into. See docs/x402-CONFORMANCE.md.
+  const nonceIsFresh = await deps.nonceStore.consume(proof.payload.authorization.nonce);
   if (!nonceIsFresh) {
     return {
       outcome: "invalid-nonce",
@@ -56,10 +60,10 @@ export async function resolveCharge(
     };
   }
 
-  const requirements = buildPaymentRequirements(resourceUrl, deps.pricing, proof.nonce);
+  const requirements = buildPaymentRequirements(resourceUrl, deps.pricing);
   const verification = await deps.facilitatorClient.verify(proof, requirements);
 
-  if (!verification.valid) {
+  if (!verification.isValid) {
     return {
       outcome: "verification-failed",
       response: buildFreshPaymentRequiredResponse(resourceUrl, deps.pricing),

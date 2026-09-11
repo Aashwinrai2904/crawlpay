@@ -111,8 +111,17 @@ async function main(): Promise<void> {
             x402Version: 1,
             scheme: "exact",
             network: "base-sepolia",
-            nonce: `load-test-${nonceCounter}-${randomUUID()}`,
-            payload: {},
+            payload: {
+              signature: "0x" + "ab".repeat(65),
+              authorization: {
+                from: "0x857b06519E91e3A54538791bDbb0E22373e36b66",
+                to: "0xPUBLISHER00000000000000000000000000000",
+                value: "10000",
+                validAfter: "0",
+                validBefore: "9999999999",
+                nonce: `load-test-${nonceCounter}-${randomUUID()}`,
+              },
+            },
           };
           req.headers = {
             ...req.headers,

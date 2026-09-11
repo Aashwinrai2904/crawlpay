@@ -28,11 +28,18 @@ export interface PaymentVerifier {
 
 /**
  * Talks to an x402 facilitator's /verify endpoint. Swappable between the
- * local mock-facilitator and a real facilitator (e.g. Coinbase's) purely
- * via CRAWLPAY_FACILITATOR_URL or the baseUrl option — callers never need
- * to know which one they're hitting. A facilitator outage or timeout never
- * throws: it resolves to a VerificationResult with valid:false and a
+ * local mock-facilitator and a real facilitator (e.g. the public
+ * https://x402.org/facilitator or Coinbase's) purely via
+ * CRAWLPAY_FACILITATOR_URL or the baseUrl option — callers never need to
+ * know which one they're hitting. A facilitator outage or timeout never
+ * throws: it resolves to a VerificationResult with isValid:false and a
  * human-readable reason.
+ *
+ * Request/response shapes match x402 spec §7.1 exactly (see
+ * docs/x402-CONFORMANCE.md) -- previously this sent `{ payload,
+ * paymentRequirements }` with no `x402Version` and read back
+ * `{ valid, amount, error }`, which a spec-compliant facilitator's real
+ * `{ isValid, invalidReason, payer }` response would always fail to parse.
  */
 export class FacilitatorClient implements PaymentVerifier {
   private readonly baseUrl: string;
@@ -57,26 +64,33 @@ export class FacilitatorClient implements PaymentVerifier {
       const response = await this.fetchImpl(`${this.baseUrl}/verify`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ payload: proof, paymentRequirements: requirements }),
+        body: JSON.stringify({
+          x402Version: proof.x402Version,
+          paymentPayload: proof,
+          paymentRequirements: requirements,
+        }),
         signal: controller.signal,
       });
 
       if (!response.ok) {
-        return { valid: false, error: `facilitator responded with status ${response.status}` };
+        return {
+          isValid: false,
+          invalidReason: `facilitator responded with status ${response.status}`,
+        };
       }
 
       const parsed = VerificationResultSchema.safeParse(await response.json());
       if (!parsed.success) {
-        return { valid: false, error: "facilitator returned a malformed response" };
+        return { isValid: false, invalidReason: "facilitator returned a malformed response" };
       }
       return parsed.data;
     } catch (err) {
       if (err instanceof Error && err.name === "AbortError") {
-        return { valid: false, error: "facilitator request timed out" };
+        return { isValid: false, invalidReason: "facilitator request timed out" };
       }
       return {
-        valid: false,
-        error: err instanceof Error ? err.message : "facilitator request failed",
+        isValid: false,
+        invalidReason: err instanceof Error ? err.message : "facilitator request failed",
       };
     } finally {
       clearTimeout(timer);
