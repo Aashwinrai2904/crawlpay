@@ -8,7 +8,7 @@ const TRANSACTION: Transaction = {
   botClassification: "ai-crawler",
   amount: "10000",
   payer: "0xPAYER",
-  facilitatorResponse: { valid: true, amount: "10000", payer: "0xPAYER" },
+  facilitatorResponse: { isValid: true, payer: "0xPAYER" },
 };
 
 describe("DashboardTransactionLog", () => {

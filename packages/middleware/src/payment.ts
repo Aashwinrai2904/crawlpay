@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { build402Response, type Http402Response, type PaymentRequirements } from "@crawlpay/core";
 import type { FastifyReply } from "fastify";
 import type { PricingConfig } from "./config/publisher-config";
@@ -6,10 +5,15 @@ import type { PricingConfig } from "./config/publisher-config";
 /** Identical wording regardless of why payment is required — a specific reason would leak state to the caller. */
 const GENERIC_PAYMENT_MESSAGE = "Payment required for this resource.";
 
+/**
+ * PaymentRequirements no longer carries a nonce (see docs/x402-CONFORMANCE.md
+ * and packages/core/src/x402.ts): anti-replay now keys off the client's own
+ * EIP-3009 authorization.nonce inside the payment payload, so this is a
+ * pure, deterministic function of (resourceUrl, pricing) again.
+ */
 export function buildPaymentRequirements(
   resourceUrl: string,
   pricing: PricingConfig,
-  nonce: string = randomUUID(),
 ): PaymentRequirements {
   return {
     scheme: "exact",
@@ -21,11 +25,9 @@ export function buildPaymentRequirements(
     payTo: pricing.payTo,
     maxTimeoutSeconds: pricing.maxTimeoutSeconds,
     asset: pricing.asset,
-    nonce,
   };
 }
 
-/** Always mints a fresh nonce — every 402, regardless of cause, is a clean invitation to retry. */
 export function buildFreshPaymentRequiredResponse(
   resourceUrl: string,
   pricing: PricingConfig,

@@ -228,7 +228,7 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
         // WordPress only calls this endpoint for its own ai-crawler match;
         // resolveCharge doesn't re-derive a classification.
         botClassification: "ai-crawler",
-        amount: decision.verification.amount ?? decision.requirements.maxAmountRequired,
+        amount: decision.requirements.maxAmountRequired,
         payer: decision.verification.payer ?? "unknown",
         facilitatorResponse: decision.verification,
       });
@@ -237,7 +237,7 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
     }
     transactionMetrics.record(
       "ai-crawler",
-      decision.verification.amount ?? decision.requirements.maxAmountRequired,
+      decision.requirements.maxAmountRequired,
     );
 
     return { action: "allow" };
@@ -297,7 +297,7 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
         timestamp: new Date(),
         url: publicUrl,
         botClassification: classification,
-        amount: decision.verification.amount ?? decision.requirements.maxAmountRequired,
+        amount: decision.requirements.maxAmountRequired,
         payer: decision.verification.payer ?? "unknown",
         facilitatorResponse: decision.verification,
       });
@@ -306,7 +306,7 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
     }
     transactionMetrics.record(
       classification,
-      decision.verification.amount ?? decision.requirements.maxAmountRequired,
+      decision.requirements.maxAmountRequired,
     );
     log.info({ paymentOutcome: "paid", payer: decision.verification.payer }, "payment verified");
 
